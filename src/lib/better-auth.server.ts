@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { twoFactor } from "better-auth/plugins/two-factor";
+import { magicLink } from "better-auth/plugins/magic-link";
+import { magicLinkTwoFactor } from "@/lib/auth/magic-link-two-factor";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { hashedBackupCodeStore } from "@/lib/auth/backup-code-hash";
 import { passkey } from "@better-auth/passkey";
@@ -15,9 +17,12 @@ import { logServerError } from "@/lib/security/safe-errors";
 /**
  * Self-hosted Better Auth — ROUT's own identity layer (System A).
  *
- * Passkey-only (WebAuthn/FIDO2). Google, GitHub, GitLab, Apple and OIDC stay
- * configured solely for LINKING identity proofs to a signed-in member; they can
- * never start a session. Data lives in the `neon_auth` schema.
+ * Sign-in: passkey (WebAuthn/FIDO2), one-time e-mail link or e-mail + password.
+ * With 2FA switched on, password and e-mail-link sign-ins need a second step
+ * (authenticator app, SMS, recovery code or passkey); admins must have 2FA on.
+ * Google, GitHub, GitLab, Apple and OIDC stay configured solely for LINKING
+ * identity proofs to a signed-in member; they can never start a session.
+ * Data lives in the `neon_auth` schema.
  *
  * Providers are only enabled when their credentials are present, so a missing
  * key disables that button instead of crashing sign-in.
@@ -114,6 +119,28 @@ function gitlabIssuer(): string {
   return (env("GITLAB_ISSUER")?.trim() || "https://gitlab.com").replace(/\/+$/, "");
 }
 
+/** On the admin portal, sign-in mails go only to admin addresses (silently, no enumeration). */
+async function mayReceiveSignInMail(email: string): Promise<boolean> {
+  const { isAdminMode } = await import("@/lib/app-mode");
+  if (!isAdminMode()) return true;
+  const { canUseAdminEmail } = await import("@/lib/auth/owner-admin.server");
+  return canUseAdminEmail(email);
+}
+
+/** Ties the anonymous tour draft to this e-mail, so the link finds it on any device. */
+async function linkTourDraft(request: Request | undefined, email: string) {
+  try {
+    const raw = (request?.headers.get("cookie") ?? "").split(";").map((c) => c.trim()).find((c) => c.startsWith("rout_tour_draft="));
+    const token = raw ? decodeURIComponent(raw.slice("rout_tour_draft=".length)) : "";
+    if (token.length < 8) return;
+    const { readTourDraftByToken, upsertTourDraft } = await import("@/lib/tour-draft.server");
+    const draft = await readTourDraftByToken(token);
+    if (draft) await upsertTourDraft(email, draft);
+  } catch (err) {
+    logServerError("auth-draft-link", err);
+  }
+}
+
 export function createRoutAuth(request?: Request) {
   // Both transports share the same guarded adapter, including auth and ALTCHA.
   if (!hasDatabase()) {
@@ -143,10 +170,23 @@ export function createRoutAuth(request?: Request) {
   const apple = pair("APPLE_CLIENT_ID", "APPLE_CLIENT_SECRET");
   if (apple) socialProviders["apple"] = { ...apple, appBundleIdentifier: env("APPLE_APP_BUNDLE_IDENTIFIER") };
 
-  // Passkey-only: no magic link, no password. Social/OIDC providers stay configured
-  // ONLY so a signed-in member can link them as identity proofs; the gateway
-  // (`passkey-only.ts`) refuses every social sign-in.
-  const plugins: unknown[] = [];
+  // Social/OIDC providers stay configured ONLY so a signed-in member can link them
+  // as identity proofs; the gateway (`sign-in-policy.ts`) refuses every social sign-in.
+  const plugins: unknown[] = [
+    magicLink({
+      expiresIn: 60 * 15,
+      // New accounts only through the passkey sign-up (consent + age checks).
+      disableSignUp: true,
+      sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
+        if (!(await mayReceiveSignInMail(email))) return;
+        await linkTourDraft(request, email);
+        const { sendLocalizedEmail, localeFromRequest } = await import("@/lib/email.server");
+        const { issueLoginCode } = await import("@/lib/login-code.server");
+        const code = await issueLoginCode(email, url);
+        await sendLocalizedEmail({ to: email, intent: "magic-link", locale: localeFromRequest(request), payload: { link: url, code: code ?? undefined } });
+      },
+    }),
+  ];
 
   const genericConfigs: unknown[] = [];
   // "ROUT ID" (voorheen Keycloak): zonder externe OIDC_*-configuratie valt deze
@@ -220,11 +260,22 @@ export function createRoutAuth(request?: Request) {
 
   const origin = baseUrlFor(request);
 
-  // Passkeys (WebAuthn) are the only way in; optional TOTP stays as an extra factor.
+  // Second step: authenticator app (TOTP), SMS code (verified number only) or recovery code.
+  // E-mail is never a second factor: the e-mail link is already a first factor.
   plugins.push(
     twoFactor({
       issuer: "ROUT",
       allowPasswordless: true,
+      otpOptions: {
+        digits: 6,
+        period: 5,
+        storeOTP: "hashed",
+        allowedAttempts: 5,
+        sendOTP: async ({ user, otp }: { user: { id: string }; otp: string }) => {
+          const { sendSecondFactorSms } = await import("@/lib/auth/second-factor.server");
+          if (!(await sendSecondFactorSms(user.id, otp))) console.warn("[2fa] no verified phone or SMS provider; code not sent");
+        },
+      },
       // 10 one-time recovery codes, stored only as peppered PBKDF2 hashes.
       backupCodeOptions: {
         amount: 10,
@@ -233,6 +284,9 @@ export function createRoutAuth(request?: Request) {
       },
       schema: { twoFactor: { modelName: "neon_auth.twoFactor" } },
     } as never),
+    magicLinkTwoFactor({
+      describe: async (authUserId) => (await import("@/lib/auth/second-factor.server")).secondFactorFacts(authUserId),
+    }),
     passkey({
       rpID: new URL(origin ?? canonicalAppUrl()).hostname,
       rpName: "ROUT",
@@ -305,8 +359,21 @@ export function createRoutAuth(request?: Request) {
         },
       },
     },
-    // Passkey-only platform: passwords are switched off entirely (db/0207 cutover).
-    emailAndPassword: { enabled: false },
+    emailAndPassword: {
+      enabled: true,
+      // New accounts only through the passkey sign-up (consent + age checks).
+      disableSignUp: true,
+      minPasswordLength: 12,
+      maxPasswordLength: 128,
+      resetPasswordTokenExpiresIn: 60 * 30,
+      // A reset (or first password) signs out every other device.
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
+        if (!(await mayReceiveSignInMail(user.email))) return;
+        const { sendLocalizedEmail, localeFromRequest } = await import("@/lib/email.server");
+        await sendLocalizedEmail({ to: user.email, intent: "password-reset", locale: localeFromRequest(request), payload: { link: url, name: user.name ?? undefined } });
+      },
+    },
     socialProviders: socialProviders as never,
     plugins: plugins as never,
     trustedOrigins: [
