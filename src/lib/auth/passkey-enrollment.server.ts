@@ -7,7 +7,7 @@
  *     first passkey and burns the token.
  * Signed-in members adding another passkey never reach these paths.
  */
-import { RECOVERY_CONTEXT_PREFIX, SIGNUP_CONTEXT_PREFIX } from "./passkey-only";
+import { RECOVERY_CONTEXT_PREFIX, SIGNUP_CONTEXT_PREFIX } from "./sign-in-policy";
 import { verifySignupTicket } from "./signup-ticket";
 
 type RegistrationUser = { id: string; name: string; displayName?: string };
