@@ -59,11 +59,13 @@ function capabilityIds(cap: unknown): string[] {
   return ids;
 }
 
-async function proveCaller(request: Request, store: LedgerStore, publicOrigin: string | null | undefined) {
+type Caller = { did: string; error?: undefined } | { did?: undefined; error: Response };
+
+async function proveCaller(request: Request, store: LedgerStore, publicOrigin: string | null | undefined): Promise<Caller> {
   const dpop = verifyDpop(request.headers.get("dpop"), { method: request.method, urls: acceptedUrls(request, publicOrigin) });
-  if (!dpop.ok) return { error: ledgerError(401, dpop.error) } as const;
-  if (!(await store.spendDpop(dpop.jkt, dpop.jti, new Date((dpop.iat + 120) * 1000)))) return { error: ledgerError(401, "dpop_replay") } as const;
-  return { did: dpop.did } as const;
+  if (!dpop.ok) return { error: ledgerError(401, dpop.error) };
+  if (!(await store.spendDpop(dpop.jkt, dpop.jti, new Date((dpop.iat + 120) * 1000)))) return { error: ledgerError(401, "dpop_replay") };
+  return { did: dpop.did };
 }
 
 async function readJson(request: Request): Promise<unknown> {
