@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@/lib/router-compat";
 import { toast } from "sonner";
-import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Loader2, MailCheck, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Loader2, Lock, Mail, MailCheck, ShieldCheck } from "lucide-react";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -23,11 +23,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SIGNUP_CONSENT_VERSION, canSubmitSignUp } from "@/lib/signup-consent";
 import { isMinorDob, signupAgeProblem } from "@/lib/minor-safety";
+import { redeemLoginCodeFn } from "@/lib/login-code.functions";
+import { SecondFactorStep } from "@/components/auth/SecondFactorStep";
 
 /** Deliberately permissive: catches typos, never rejects a valid address. */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Mode = "signin" | "signup" | "recovery";
+type Mode = "signin" | "signup" | "recovery" | "reset";
+/** Steps inside the sign-in card. */
+type SignInStep = "choose" | "password" | "link-sent" | "second" | "reset-request" | "reset-sent";
+const MIN_PASSWORD = 12;
 type ApiResult = { data?: Record<string, unknown>; error?: { code?: string; message?: string } };
 
 function errorMessage(error: unknown, fallback: string) {
@@ -59,9 +64,10 @@ async function enrollPasskey(context: string, name: string) {
 }
 
 /**
- * ROUT sign-in card, PASSKEY-ONLY (WebAuthn/FIDO2): no passwords, no e-mail
- * links, no social sign-in. Sign-up creates the account together with its first
- * passkey; accounts without a passkey recover through an admin-verified link.
+ * ROUT sign-in card. First step: passkey (WebAuthn/FIDO2), one-time e-mail link
+ * (with a 6-digit code for another device) or e-mail + password. Members with
+ * 2FA on finish with a second step (passkey, authenticator app, SMS or recovery
+ * code). Sign-up creates the account together with its first passkey.
  */
 export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mode }) {
   const { t } = useTranslation();
@@ -75,8 +81,11 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
-  const [needTotp, setNeedTotp] = useState(false);
-  const [totp, setTotp] = useState("");
+  const [step, setStep] = useState<SignInStep>("choose");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [mailCode, setMailCode] = useState("");
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [recoveryFiled, setRecoveryFiled] = useState(false);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [consented, setConsented] = useState(false);
@@ -108,16 +117,24 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
     const code = params.get("error");
     const redirect = params.get("redirect") ?? params.get("next");
     const token = params.get("token");
-    if (token && /^[0-9a-f]{64}$/.test(token)) {
+    if (initialMode === "reset") {
+      if (token && /^[A-Za-z0-9_-]{8,128}$/.test(token)) setResetToken(token);
+      else if (code) toast.error(t("auth.mf.resetInvalid"));
+    } else if (token && /^[0-9a-f]{64}$/.test(token)) {
       setRecoveryToken(token);
       setMode("recovery");
     }
-    if (code) {
+    if (params.get("second_factor") === "1") {
+      setMode("signin");
+      setStep("second");
+    }
+    if (code && initialMode !== "reset") {
       const known = (AUTH_ERROR_CODES as readonly string[]).includes(code) ? code : "provider_rejected";
-      toast.error(known === "method_disabled" ? t("auth.pk.methodDisabled") : t("auth.pk.failed"));
+      toast.error(known === "method_disabled" ? t("auth.pk.methodDisabled") : known === "link_expired" ? t("auth.mf.linkExpired") : t("auth.pk.failed"));
     }
     if (redirect) void beginAuthIntent({ data: { next: redirect } }).catch(() => null);
     if (params.toString()) window.history.replaceState({}, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
   const onEmailChange = (value: string) => {
@@ -141,11 +158,6 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
         toast.error(res.error.message || t("auth.passkey.failed"));
         return;
       }
-      if ((res as { data?: { twoFactorRedirect?: boolean } } | undefined)?.data?.twoFactorRedirect) {
-        setTotp("");
-        setNeedTotp(true);
-        return;
-      }
       toast.success(t("auth.ui.toast.welcome"));
       await refresh();
     } catch (err) {
@@ -157,7 +169,7 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
 
   // WebAuthn Conditional UI: saved passkeys appear in the browser's autofill.
   useEffect(() => {
-    if (!readiness?.ready || mode !== "signin") return;
+    if (!readiness?.ready || mode !== "signin" || step === "second") return;
     let cancelled = false;
     const pkc = typeof window !== "undefined" ? window.PublicKeyCredential : undefined;
     if (!pkc?.isConditionalMediationAvailable) return;
@@ -176,20 +188,125 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readiness?.ready, mode]);
+  }, [readiness?.ready, mode, step === "second"]);
 
-  const verifyTotp = async (e: React.FormEvent) => {
+  const failMessage = (error: { code?: string; message?: string; status?: number } | undefined, fallback: string) => {
+    if (!error) return fallback;
+    if (error.status === 429 || error.code === "rate_limited") return t("auth.ui.code.tooMany");
+    if (error.code === "INVALID_EMAIL_OR_PASSWORD") return t("auth.mf.wrongPassword");
+    return error.message || fallback;
+  };
+
+  /** One-time e-mail link (+ 6-digit code for another device). */
+  const sendLink = async () => {
+    if (unavailable) { toast.error(AUTH_UNAVAILABLE_TEXT[locale]); return; }
+    if (!emailAccepted()) return;
+    setLoading(true);
+    const address = email.trim().toLowerCase();
+    try {
+      const result = await withAltcha(address, (proof) =>
+        authClient.signIn.magicLink({ email: address, callbackURL: POST_AUTH_PATH, errorCallbackURL: "/auth/sign-in?error=link_expired", fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      const error = (result as { error?: { code?: string; message?: string; status?: number } } | undefined)?.error;
+      if (error) {
+        toast.error(failMessage(error, t("auth.mail.failed")));
+        return;
+      }
+      setMailCode("");
+      setStep("link-sent");
+    } catch (err) {
+      toast.error(errorMessage(err, t("auth.mail.failed")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const redeemMailCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await authClient.twoFactor.verifyTotp({ code: totp, trustDevice: true });
-      if (res.error) {
-        toast.error(res.error.message || t("auth.ui.code.invalid"));
+      const res = await redeemLoginCodeFn({ data: { email: email.trim().toLowerCase(), code: mailCode } });
+      if (!res.ok) {
+        toast.error(res.reason === "rate_limited" ? t("auth.ui.code.tooMany") : t("auth.ui.code.invalid"));
         return;
       }
-      setNeedTotp(false);
+      window.location.assign(res.link);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const passwordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (unavailable) { toast.error(AUTH_UNAVAILABLE_TEXT[locale]); return; }
+    if (!emailAccepted() || !password) return;
+    setLoading(true);
+    const address = email.trim().toLowerCase();
+    try {
+      const result = await withAltcha(address, (proof) =>
+        authClient.signIn.email({ email: address, password, callbackURL: POST_AUTH_PATH, fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      const error = (result as { error?: { code?: string; message?: string; status?: number } } | undefined)?.error;
+      if (error) {
+        toast.error(failMessage(error, t("auth.ui.toast.signinFailed")));
+        return;
+      }
+      setPassword("");
+      if ((result as { data?: { twoFactorRedirect?: boolean } }).data?.twoFactorRedirect) {
+        setStep("second");
+        return;
+      }
       toast.success(t("auth.ui.toast.welcome"));
       await refresh();
+    } catch (err) {
+      toast.error(errorMessage(err, t("auth.ui.toast.signinFailed")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Mails a link to set a first password or replace a forgotten one. */
+  const requestReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (unavailable) { toast.error(AUTH_UNAVAILABLE_TEXT[locale]); return; }
+    if (!emailAccepted()) return;
+    setLoading(true);
+    const address = email.trim().toLowerCase();
+    try {
+      const result = await withAltcha(address, (proof) =>
+        authClient.requestPasswordReset({ email: address, redirectTo: "/auth/reset-password", fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      const error = (result as { error?: { code?: string; message?: string; status?: number } } | undefined)?.error;
+      if (error) {
+        toast.error(failMessage(error, t("auth.ui.toast.failed")));
+        return;
+      }
+      setStep("reset-sent");
+    } catch (err) {
+      toast.error(errorMessage(err, t("auth.ui.toast.failed")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetToken) return;
+    if (password.length < MIN_PASSWORD) { toast.error(t("auth.mf.tooShort")); return; }
+    if (password !== password2) { toast.error(t("auth.mf.mismatch")); return; }
+    setLoading(true);
+    try {
+      const res = await authClient.resetPassword({ newPassword: password, token: resetToken });
+      if (res.error) {
+        toast.error(/token/i.test(res.error.message ?? "") ? t("auth.mf.resetInvalid") : res.error.message || t("auth.ui.toast.failed"));
+        return;
+      }
+      setPassword("");
+      setPassword2("");
+      setResetToken(null);
+      toast.success(t("auth.mf.resetDone"));
+      setMode("signin");
+      setStep("password");
     } finally {
       setLoading(false);
     }
