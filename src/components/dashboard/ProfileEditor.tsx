@@ -1187,6 +1187,8 @@ export function ProfileEditor({ variant = "verified", pageMode = "profile", onPa
                 onOpenAddDrawer={() => setDrawer(true)}
                 onAddKind={(kind, value) => addBlock(kind, value)}
                 handle={normalized || handle}
+                linkMode={resolveLinkMode(normalizeDesignLayers(prefs.designLayers).linkDisplay, prefs.buttonShape)}
+                profileCity={cityFromBadge(prefs.locationBadge)}
                 onImportMeta={({ displayName: name, tagline: line }) => {
                   if (name) setDisplayName(name);
                   if (line) setTagline(line);
@@ -1198,6 +1200,8 @@ export function ProfileEditor({ variant = "verified", pageMode = "profile", onPa
                 onOpenBlockChange={setOpenBlock}
                 onAddKind={(kind, value) => addBlock(kind, value)}
                 ensureBlock={(kind) => setBlocks((current) => ensureStudioWidget(current, kind))}
+                onBlocksChange={setBlocks}
+                profileCity={cityFromBadge(prefs.locationBadge)}
                 handle={normalized || handle}
                 designLayers={prefs.designLayers}
                 onDesignLayersChange={(value) => setPref("designLayers", value)}
