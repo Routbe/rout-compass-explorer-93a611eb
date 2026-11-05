@@ -574,7 +574,7 @@ export function ProfileView({
         {iconLinks.length > 0 && (() => {
           const logo = (b: ProfileBlock) => (
               <a key={b.id} href={blockHref(b)} target="_blank" rel="noopener noreferrer" onClick={() => trackClick(b.id, b.label)} aria-label={b.label} title={b.label}
-                className={cn("flex h-11 w-11 items-center justify-center transition-transform hover:-translate-y-0.5", ctaClass(b.id))}
+                className={cn("flex h-11 w-11 shrink-0 items-center justify-center transition-transform hover:-translate-y-0.5", ctaClass(b.id))}
                 style={{ ...styleFor(b.kind), borderRadius: 999, padding: 0, minHeight: 0 }}>
                 {b.thumbnailUrl ? <img src={b.thumbnailUrl} alt="" className="h-6 w-6 rounded-full object-cover" loading="lazy" /> : <SocialPlatformIcon source={blockHref(b) || b.kind} iconMode={b.iconMode} className="h-5 w-5 text-current" />}
               </a>
