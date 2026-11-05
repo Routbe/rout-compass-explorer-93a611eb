@@ -55,7 +55,7 @@ const sealed = () => ({ blob: `v1.${toB64u(crypto.getRandomValues(new Uint8Array
 function post(sk: Uint8Array, body: unknown, proof = createDpopProof(sk, "POST", URL_)) {
   return new Request(URL_, { method: "POST", headers: { "content-type": "application/json", dpop: proof }, body: JSON.stringify(body) });
 }
-const json = async (r: Response) => ({ status: r.status, ...(await r.json()) });
+const json = async (r: Response) => ({ ...(await r.json()), status: r.status });
 
 describe("blind ledger append", () => {
   it("accepts a signed chain from the controller and a delegated agent, rejecting everything else", async () => {
