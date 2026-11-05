@@ -6,8 +6,12 @@ import { requireAuth } from "@/lib/auth/middleware";
 export const getDashboardMusic = createServerFn({ method: "GET" }).middleware([requireAuth]).handler(async ({ context }) => {
   const { nowPlaying, spotifyConfigured } = await import("./spotify-presence.server");
   if (!spotifyConfigured()) return { playing: false, reason: "not_configured" };
-  try { return await nowPlaying(context.userId); }
-  catch { return { playing: false, reason: "unavailable" }; }
+  const { proxied } = await import("./image-proxy-rules");
+  try {
+    // Same sealed token row as the Studio/Hub link; nowPlaying refreshes it when needed.
+    const live = await nowPlaying(context.userId);
+    return { ...live, image: proxied(live.image ?? null), syncedAt: Date.now() };
+  } catch { return { playing: false, reason: "unavailable" }; }
 });
 
 /** Fixed provider endpoints only. No GPS, arbitrary URL, stored location or public visibility. */
@@ -35,9 +39,14 @@ const prefsSchema = z.object({
 /** Command Center preferences live on the ROUT profile (display_prefs.commandCenter), so they follow the member across devices. */
 export const getCommandCenterPrefs = createServerFn({ method: "GET" }).middleware([requireAuth]).handler(async ({ context }) => {
   const { sql } = await import("@/lib/neon");
-  const rows = await sql`select display_prefs -> 'commandCenter' as cc from public.profiles where id = ${context.userId}`;
+  const { resolveDashboardCity } = await import("./dashboard-shared");
+  const rows = await sql`select display_prefs -> 'commandCenter' as cc, display_prefs ->> 'locationBadge' as badge, blocks
+    from public.profiles where id = ${context.userId}`;
   const cc = (rows[0]?.["cc"] ?? {}) as { layout?: unknown; weatherCity?: string | null };
-  return { layout: cc.layout ?? null, weatherCity: typeof cc.weatherCity === "string" ? cc.weatherCity : null };
+  const ownCity = typeof cc.weatherCity === "string" ? cc.weatherCity : null;
+  // One location for profile and dashboard: an own dashboard city overrides, else the profile's.
+  const shared = resolveDashboardCity({ dashboardCity: ownCity, blocks: rows[0]?.["blocks"] as never, locationBadge: rows[0]?.["badge"] });
+  return { layout: cc.layout ?? null, weatherCity: shared.city, weatherCitySource: shared.source, ownWeatherCity: ownCity };
 });
 
 export const saveCommandCenterPrefs = createServerFn({ method: "POST" }).middleware([requireAuth])

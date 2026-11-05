@@ -18,7 +18,8 @@ export function resolveDashboardCity(input: {
 }): { city: string | null; source: DashboardCitySource } {
   const own = typeof input.dashboardCity === "string" ? input.dashboardCity.trim() : "";
   if (own.length >= 2) return { city: own, source: "dashboard" };
-  const place = sharedWidgetPlace(Array.isArray(input.blocks) ? input.blocks : []);
+  const blocks = Array.isArray(input.blocks) ? input.blocks : [];
+  const place = sharedWidgetPlace(blocks.map((b) => ({ kind: String(b?.kind ?? ""), value: typeof b?.value === "string" ? b.value : "" })));
   if (place?.name) return { city: place.name, source: "widget" };
   const badge = cityFromBadge(typeof input.locationBadge === "string" ? input.locationBadge : null);
   // Badges read "Gent, België"; the weather lookup wants the city name only.

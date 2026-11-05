@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { formatTrackTime, interpolateProgress, spotifyTileAction, type DashboardCitySource } from "@/lib/dashboard-shared";
 import { useServerFn } from "@tanstack/react-start";
 import { CloudSun, Music2, RefreshCw, ExternalLink, LockKeyhole, Users } from "lucide-react";
 import { getDashboardMusic, getDashboardWeather } from "@/lib/dashboard-widgets.functions";
@@ -8,7 +10,10 @@ import { Button } from "@/components/ui/button";
 const MUSIC_REASON: Record<string, string> = {
   not_connected: "Spotify is nog niet gekoppeld aan je ROUT-profiel.",
   not_configured: "Spotify is op deze server nog niet ingesteld.",
-  not_playing: "Er speelt nu niets.",
+  not_playing: "Gepauzeerd.",
+  unauthorized: "De Spotify-toegang is verlopen of ingetrokken. Koppel opnieuw.",
+  rate_limited: "Spotify vraagt even te wachten.",
+  forbidden: "Spotify weigert dit account. Controleer de app-toegang in Spotify.",
   no_content: "Er speelt nu niets.",
   unavailable: "Spotify is even niet bereikbaar.",
 };

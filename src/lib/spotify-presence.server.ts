@@ -199,7 +199,15 @@ export async function cachedNowPlaying(userId: string): Promise<NowPlaying> {
 
 /** Only public track info; never tokens or account details. */
 export async function nowPlaying(userId: string): Promise<NowPlaying> {
-  let token = await accessToken(userId);
+  let token: string | null;
+  try {
+    token = await accessToken(userId);
+  } catch (e) {
+    // A refused refresh (revoked app access, rotated secret) needs a fresh link, not a retry.
+    const m = /^spotify_token_(\d+)$/.exec(e instanceof Error ? e.message : "");
+    if (m && (m[1] === "400" || m[1] === "401")) return { playing: false, reason: "unauthorized" };
+    throw e;
+  }
   if (!token) return { playing: false, reason: "not_connected" };
   const call = (t: string) =>
     fetch("https://api.spotify.com/v1/me/player/currently-playing?additional_types=episode", {
@@ -207,8 +215,9 @@ export async function nowPlaying(userId: string): Promise<NowPlaying> {
     });
   let res = await call(token);
   if (res.status === 401) {
-    token = await accessToken(userId, true).catch(() => null);
-    if (token) res = await call(token);
+    const fresh = await accessToken(userId, true).catch(() => null);
+    if (!fresh) return { playing: false, reason: "unauthorized" };
+    res = await call(fresh);
   }
   const bad = reasonFromStatus(res.status);
   if (bad) {
@@ -233,11 +242,11 @@ export async function nowPlaying(userId: string): Promise<NowPlaying> {
     };
   };
   if (!j.item) return { playing: false, reason: j.is_playing ? "unsupported_type" : "not_playing" };
-  if (!j.is_playing) return { playing: false, reason: "not_playing" };
   const ep = j.currently_playing_type === "episode";
+  // Paused tracks keep their details (owner dashboard shows them dimmed); public reads only use `playing`.
   return {
-    playing: true,
-    reason: "playing",
+    playing: Boolean(j.is_playing),
+    reason: j.is_playing ? "playing" : "not_playing",
     title: j.item.name,
     artist: ep ? j.item.show?.name ?? "Podcast" : (j.item.artists ?? []).map((a) => a.name).join(", "),
     album: ep ? j.item.show?.name : j.item.album?.name,
