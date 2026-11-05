@@ -153,12 +153,12 @@ function Facade({ provider, title, poster, onLoad, children }: { provider: strin
       aria-label={t("profile.vw.load", { provider })}
     >
       {poster && <img src={poster} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover opacity-80 transition-opacity group-hover:opacity-100" />}
-      <span className={cn("relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-current/30 backdrop-blur", poster && "bg-black/40")}>
+      <span className={cn("relative inline-flex h-12 w-12 items-center justify-center rounded-full border border-current/30 backdrop-blur", poster && "bg-background/60")}>
         <Play className="h-5 w-5" aria-hidden />
       </span>
-      <span className={cn("relative text-sm font-medium", poster && "rounded-full bg-black/50 px-3 py-1")}>{title}</span>
+      <span className={cn("relative text-sm font-medium", poster && "rounded-full bg-background/70 px-3 py-1")}>{title}</span>
       {children}
-      <span className={cn("relative text-[11px] opacity-70", poster && "rounded-full bg-black/50 px-2 py-0.5")}>{t("profile.vw.consent", { provider })}</span>
+      <span className={cn("relative text-[11px] opacity-70", poster && "rounded-full bg-background/70 px-2 py-0.5")}>{t("profile.vw.consent", { provider })}</span>
     </button>
   );
 }
@@ -227,7 +227,7 @@ function VideoBody({ url, label }: { url: string; label: string }) {
   const embed = videoEmbed(url)!;
   const [on, setOn] = useState(false);
   if (embed.kind === "file") {
-    return <video src={embed.src} controls preload="metadata" playsInline className="block aspect-video w-full flex-1 bg-black object-contain" aria-label={label} />;
+    return <video src={embed.src} controls preload="metadata" playsInline className="block aspect-video w-full flex-1 bg-muted object-contain" aria-label={label} />;
   }
   const id = youtubeId(embed.src);
   const provider = id ? "YouTube" : "Vimeo";
