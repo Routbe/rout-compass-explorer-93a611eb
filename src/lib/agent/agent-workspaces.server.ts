@@ -69,7 +69,7 @@ export type ClaimSecret = { purpose: "token" | "code"; value: string };
  * normal draft. Conditional on the payload still being sealed, so a retry is a no-op.
  * Returns the data key (caller wipes it) or null when the draft was not sealed.
  */
-async function unsealDraftAsOwner(userId: string, workspaceId: string, secret: ClaimSecret): Promise<Uint8Array | null> {
+async function unsealDraftAsOwner(userId: string, workspaceId: string, secret: ClaimSecret): Promise<{ dk: Uint8Array; sid: string } | null> {
   const { openDraft, sealedEnvelope, unwrapDataKey } = await import("./agent-draft-seal");
   return withDbContext({ userId, workspaceId }, async () => {
     const rows = (await sql`select payload from public.workspace_profile_drafts where workspace_id = ${workspaceId} limit 1`) as Array<{ payload: unknown }>;
@@ -80,7 +80,7 @@ async function unsealDraftAsOwner(userId: string, workspaceId: string, secret: C
     await sql`update public.workspace_profile_drafts
          set payload = ${JSON.stringify(draft)}::jsonb, revision = revision + 1, updated_by = ${userId}, updated_at = now()
        where workspace_id = ${workspaceId} and payload ? '$sealed'`;
-    return dk;
+    return { dk, sid: env.sid };
   });
 }
 
@@ -98,9 +98,9 @@ export async function recoverSealedAgentDraft(userId: string, secret: ClaimSecre
   );
   for (const r of rows) {
     try {
-      const dk = await unsealDraftAsOwner(userId, r.workspace_id, secret);
-      dk?.fill(0);
-      if (dk) return { workspaceId: r.workspace_id, slug: r.slug };
+      const opened = await unsealDraftAsOwner(userId, r.workspace_id, secret);
+      opened?.dk.fill(0);
+      if (opened) return { workspaceId: r.workspace_id, slug: r.slug };
     } catch {
       /* not this workspace's secret */
     }
@@ -137,18 +137,16 @@ export async function claimAgentWorkspace(
   let pending: unknown = row.pending_apps;
   let draftRestored = true;
   if (secret) {
-    const { openApps, sealedEnvelope } = await import("./agent-draft-seal");
-    let dk: Uint8Array | null = null;
+    const { openApps } = await import("./agent-draft-seal");
+    let opened: { dk: Uint8Array; sid: string } | null = null;
     try {
-      dk = await unsealDraftAsOwner(userId, row.workspace_id, secret);
-      const sid = dk ? (await import("@/lib/neon")) && null : null;
-      void sid;
-      pending = dk ? await openApps(row.pending_apps, dk, await sandboxIdOf(row.pending_apps, userId, row.workspace_id, sealedEnvelope)) : row.pending_apps;
+      opened = await unsealDraftAsOwner(userId, row.workspace_id, secret);
+      if (opened) pending = await openApps(row.pending_apps, opened.dk, opened.sid);
     } catch (error) {
       draftRestored = false;
       console.error("[agent:claim] draft unseal failed:", (error as Error).message);
     } finally {
-      dk?.fill(0);
+      opened?.dk.fill(0);
     }
   }
   const { sandboxAppInput } = await import("./agent-sandbox");
