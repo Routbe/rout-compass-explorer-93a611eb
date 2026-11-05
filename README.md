@@ -102,7 +102,7 @@ All of this runs on European infrastructure (Neon Postgres in `eu-central-1`, Sc
 <td><code>src/routes/_authenticated/console.*</code>, <code>src/lib/webhooks/</code>, <code>src/lib/api-keys*</code></td></tr>
 
 <tr><td><b>Identity verification</b></td>
-<td>Tiered verified identities (W Identity OIDC, Didit passport scan) with a one-person-one-identity rule via peppered HMACs. Linked identities with rel-me, ATProto and fediverse proofs. User-verified claims and selective disclosure through a Merkle ledger.</td>
+<td>Two tiers. <b>Real human</b> proves a unique person and still allows a pseudonym. <b>Legal identity</b> is derived from a government document. Providers: Didit, itsme, eID, W Identity and manual review. A passkey proves device ownership, not uniqueness. Peppered HMACs enforce one person, one identity. Aliases never show the legal name. Linked identities with rel-me, ATProto and fediverse proofs. User-verified claims and selective disclosure through a Merkle ledger.</td>
 <td><code>src/lib/identity/</code>, <code>src/lib/ledger/</code>, <code>db/0130_*</code>, <code>db/0146_*</code></td></tr>
 
 <tr><td><b>ROUT Card & Wallet</b></td>
@@ -114,15 +114,15 @@ All of this runs on European infrastructure (Neon Postgres in `eu-central-1`, Sc
 <td><code>src/routes/w.$slug*.tsx</code>, <code>src/routes/_authenticated/studio_.w.*</code>, <code>db/96_workspaces.sql</code>, <code>db/0131_*</code></td></tr>
 
 <tr><td><b>Booking engine</b></td>
-<td>Event types, availability, custom fields, signed booking tokens, ICS export, accept/decline actions and calendar sitemaps.</td>
+<td>Event types with duration, buffers, minimum notice, booking horizon, capacity, confirmation mode, pricing and intake fields. Round-robin and collective host routing, availability bitmaps, signed booking tokens, ICS export and accept/decline actions. Each booking runs in one batch: advisory locks, then an availability check, then the insert. A GiST exclusion constraint is the final guard against double-booking.</td>
 <td><code>src/lib/booking-engine/</code>, <code>src/routes/book.$eventTypeId.tsx</code>, <code>src/routes/booking.$bookingId.tsx</code></td></tr>
 
 <tr><td><b>Creator support & payments</b></td>
-<td>Tip pages, donations, gift cards, promo codes, payment pages. Stripe Checkout & Connect payouts, bunq OAuth & banking webhooks, SEPA review queue, PIX/UPI rails, invoices.</td>
+<td>Tip pages that <b>never move money through ROUT</b>: an EPC/SEPA QR code and IBAN text are always on, and creators can add their own Stripe/Mollie keys, stored only AES-GCM encrypted in <code>psp_credentials</code>. Also donations, gift cards, promo codes, payment pages, Stripe Connect account status, bunq OAuth & banking webhooks, a SEPA review queue, PIX/UPI rails and invoices.</td>
 <td><code>src/routes/$username_.tip.tsx</code>, <code>src/routes/gift*.tsx</code>, <code>src/routes/api_.public.stripe-webhook.ts</code></td></tr>
 
 <tr><td><b>SecureShield wallet</b></td>
-<td>Account security wallet with billing, transfer scanning and security codes.</td>
+<td>A prepaid wallet with relay credits (separate from Apple/Google Wallet passes). Stripe top-ups, monthly relay charging and transfer scanning.</td>
 <td><code>db/20_secureshield_wallet.sql</code>, <code>src/routes/api_.public.cron.secureshield-billing.ts</code></td></tr>
 
 <tr><td><b>Questions & stories</b></td>
@@ -181,7 +181,7 @@ All of this runs on European infrastructure (Neon Postgres in `eu-central-1`, Sc
 | Cryptography | `jose`, `@noble/hashes`, `@scure/bip39`, `node-forge`, WebCrypto inside a dedicated enclave worker |
 | Anti-abuse | ALTCHA proof-of-work captcha, HMAC-signed PoW challenges, rate limits |
 | Storage | **Scaleway Object Storage** (S3-compatible, signed via `aws4fetch`) |
-| Email | **Brevo** (transactional + inbound parsing), ImprovMX forwarding, React Email templates |
+| Email | **Infomaniak SMTP** (per-mailbox, TLS 465/587), optional Postmark-compatible fallback, **Brevo** driver + inbound parsing, ImprovMX forwarding, React Email templates |
 | Payments | **Stripe** (Checkout, Connect), **bunq** (OAuth, banking webhooks), SEPA/EPC QR |
 | Rendering | `@resvg/resvg-wasm` for OG images and wallet artwork, `jspdf`, `jszip`, `qr-code-styling` |
 | i18n | `i18next` + `react-i18next` |
@@ -333,7 +333,8 @@ ROUT treats security as architecture, not as a feature. These guarantees are enf
 
 ### Integrity & accountability
 - **Hash-chained audit logs** with a head lock and daily HMAC-signed checkpoints (`db/0127`, `db/0150`, `/api/public/cron/audit-checkpoint`).
-- **Signed outbound webhooks** (`db/0129_signed_webhooks.sql`, `src/lib/webhooks/`).
+- **Signed outbound webhooks** (`db/0129_signed_webhooks.sql`, `src/lib/webhooks/signature.ts`): `X-Rout-Signature: t=<unix>,v1=<HMAC-SHA256(timestamp.body)>`, a 300-second verification window, and up to 8 attempts with exponential backoff capped at 6 hours.
+- **CSRF protection** for every server function (`src/start.ts`). Custom API routes verify their own callers.
 - **Merkle disclosure ledger** for selective disclosure (`db/0146`).
 
 ### AI agents without accounts
@@ -422,7 +423,7 @@ Without a database the public marketing pages, QR Studio and documentation still
 | Identity linking | `GOOGLE_*`, `APPLE_*`, `GITHUB_*`, `GITLAB_*`, `INFOMANIAK_*`, `PROTON_*`, `OIDC_*` | optional |
 | Verification (KYC) | `IDENTITY_HASH_PEPPER`, `W_IDENTITY_*`, `DIDIT_*` | optional |
 | Storage | `SCALEWAY_ACCESS_KEY`, `SCALEWAY_SECRET_KEY`, `SCALEWAY_ENDPOINT`, `SCALEWAY_REGION`, `SCALEWAY_*_BUCKET` (or generic `S3_*`) | optional |
-| Email | `BREVO_*`, `EMAIL_FROM`, `IMPROVMX_API_KEY`, `EMAIL_INBOUND_TOKEN`, `ROUT_FORWARD_EMAIL_DOMAIN` | optional |
+| Email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER_AUTH` / `SMTP_PASS_AUTH`, `SMTP_USER_SYSTEM` / `SMTP_PASS_SYSTEM`, `BREVO_*`, `EMAIL_FROM`, `IMPROVMX_API_KEY`, `EMAIL_INBOUND_TOKEN`, `ROUT_FORWARD_EMAIL_DOMAIN` | ✅ for sign-up mail |
 | Payments | `STRIPE_*`, `BUNQ_*`, `BANKING_WEBHOOK_*`, `PIX_*`, `UPI_VPA`, `PROMO_CODES` | optional |
 | Wallet passes | `APPLE_WALLET_*`, `GOOGLE_WALLET_*` | optional (falls back to a demo payload with `503`) |
 | Phone & SMS | `SMS_*`, `PHONE_ENCRYPTION_KEY`, `TELEGRAM_BOT_TOKEN` | optional |
@@ -449,7 +450,10 @@ Without a database the public marketing pages, QR Studio and documentation still
 
 - `db/` contains **ordered, immutable** SQL migrations, from `00_compat.sql` and `01_align.sql` up to `0207_auth_quarantine.sql`, plus `0000_baseline.sql`, `baseline-seed.sql` and `schema.snapshot.json`.
 - Historical migrations are **never edited**. Fixes ship as new delta migrations (for example `0143_schema_grants_alignment.sql`).
-- Applied files are tracked with checksums in `public.schema_migrations`.
+- Applied files are tracked with SHA-256 checksums in `public.schema_migrations`.
+- `0000_baseline.sql` covers every migration up to **110**. On an empty database the planner runs the baseline and marks the covered files as applied. On an existing database it records the baseline and runs only the outstanding deltas (`scripts/migration-plan.ts`).
+- `db/baseline-seed.sql` seeds reference rows only: pricing configuration, a promo code, a badge and the first-party PKCE client `rout_native_self`. It contains no member accounts.
+- Better Auth stores its own tables in the `neon_auth` schema.
 - Migrations are **reviewed and applied by a human** with an owner credential: `bun scripts/migrate.ts`, `bun scripts/migrate-gateway.ts`, or the Neon SQL editor. Builds and deploys never run them.
 
 ### Roles
@@ -471,7 +475,7 @@ Then use that login's connection string as `DATABASE_URL`.
 
 ### Schema tooling
 
-- `drizzle/schema.ts` mirrors the schema for typed tooling. `src/lib/db-types.gen.ts` is generated from the snapshot.
+- The SQL files in `db/` are canonical. `drizzle/` only holds generated metadata and is not the migration history. `src/lib/db-types.gen.ts` is generated from the snapshot.
 - `bun scripts/schema-snapshot.ts --check` exits non-zero when the live catalog drifts from `db/schema.snapshot.json`. Run it after every migration.
 
 ### Domain overview (selection)
@@ -629,6 +633,14 @@ The app builds with **Nitro**:
 | Signing-key rotation | Add new key → `bun scripts/seal-signing-keys.ts` → publish via JWKS → retire old key |
 | Webhook backlog | Check `/api/public/cron/deliver-webhooks` schedule and `webhook_deliveries` |
 | Wallet passes failing | Verify `APPLE_WALLET_*` / `GOOGLE_WALLET_*`. Partial config returns `503` with a demo payload. |
+
+### Known gaps
+
+These items are referenced in the code or docs but not yet present in the repository:
+
+- [ ] `vercel.json` and the `build:vercel`, `db:check` and `release:check` package scripts, which `ENVIRONMENT.md` mentions. Use the direct `bun scripts/...` commands above until they are added.
+- [ ] `public/sw.js`: `src/lib/pwa.ts` registers a service worker, but the file is not checked in, so there is no offline support yet.
+- [ ] `worker/bun.lock`: `worker/Dockerfile` copies it with `--frozen-lockfile`. Run `bun install --cwd worker` once and commit the lockfile before building the image.
 
 ---
 
