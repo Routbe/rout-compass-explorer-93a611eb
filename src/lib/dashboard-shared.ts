@@ -32,7 +32,7 @@ export function resolveDashboardCity(input: {
 export function interpolateProgress(t: { playing?: boolean; progressMs?: number; durationMs?: number; syncedAt?: number }, now: number): number {
   const base = Math.max(0, t.progressMs ?? 0);
   const duration = Math.max(0, t.durationMs ?? 0);
-  if (!t.playing || !t.syncedAt) return duration ? Math.min(base, duration) : base;
+  if (!t.playing || t.syncedAt == null) return duration ? Math.min(base, duration) : base;
   const moved = base + Math.max(0, now - t.syncedAt);
   return duration ? Math.min(moved, duration) : moved;
 }
