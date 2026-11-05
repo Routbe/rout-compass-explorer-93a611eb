@@ -5,6 +5,8 @@
  */
 import type { EnclaveArgs, EnclaveErrorCode, EnclaveOp, EnclaveRequest, EnclaveResponse, EnclaveResult, LedgerDraft, SealedForUser, VaultSummary } from "./protocol";
 import type { PrivateEnvelope } from "@/lib/ledger/crypto";
+import type { Capability, CapabilityGrant } from "@/lib/protocol/capabilities";
+import type { EventDraft, SignedEvent } from "@/lib/protocol/events";
 
 export type { LedgerDraft, SealedForUser, VaultSummary } from "./protocol";
 
