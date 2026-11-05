@@ -6,7 +6,7 @@
 2. Paste every variable from *Required on Vercel* below, plus the optional groups you use, in Vercel → Settings → Environment Variables (Production and Preview).
 3. Review pending `db/NNNN_*.sql` migrations separately. Never run owner-level migrations automatically in a Vercel build. Use the Neon gateway migration workflow or the Neon SQL editor after reviewing the exact statements; then run `bun run db:check` using gateway credentials (schema drift against `db/schema.snapshot.json`). Never apply these scripts to Lovable Cloud.
 4. Point each OAuth provider's callback to `<PUBLIC_ORIGIN>/api/auth/callback/<provider>` (using the normalized HTTPS origin).
-5. The committed daily cron calls `/api/public/cron/cleanup-assets`. Configure **`CRON_SECRET`** in Vercel: Vercel sends it as a bearer token. `LOVABLE_CRON_SECRET` is the handler's fallback for other schedulers. Other queues, including outbound webhooks and audit checkpoints, need their own reviewed schedules; the daily cleanup does not deliver webhooks.
+5. A daily scheduler must call `/api/public/cron/cleanup-assets` (this repository ships no `vercel.json`; add one or use any external scheduler). Configure **`CRON_SECRET`** in Vercel: Vercel sends it as a bearer token. `LOVABLE_CRON_SECRET` is the handler's fallback for other schedulers. Other queues, including outbound webhooks and audit checkpoints, need their own reviewed schedules; the daily cleanup does not deliver webhooks.
 
 `NODE_ENV` is set by Vercel; never set it yourself.
 
@@ -194,7 +194,7 @@ Live Presence (Studio → Verbindingen & Integraties). Create an app at develope
 - `DIDIT_API_KEY`, `DIDIT_WORKFLOW_ID`, `DIDIT_WEBHOOK_SECRET` — Didit passport scan. Webhook URL: `https://rout.be/api/public/identity/didit-webhook`. Max 500 successful scans per month.
 
 ## Cron schedule
-`vercel.json` schedules `/api/public/cron/cleanup-assets` (daily, removes expired `user_assets` and `shared_files` from storage and database), plus expired ALTCHA rows, security codes and the DNS check — one daily job, since Vercel Hobby allows only one. Codes are also purged lazily on issue, ALTCHA on ~5% of challenges, and integration statuses refresh on visit (stale-while-revalidate). Vercel sends `Authorization: Bearer $CRON_SECRET`. On other hosts call the same URLs from any scheduler with that header.
+`vercel.json` schedules `/api/public/cron/cleanup-assets` (daily, removes expired `user_assets` and `shared_files` from storage and database), plus expired ALTCHA rows, security codes and the DNS check — one daily job, since Vercel Hobby allows only one. Codes are also purged lazily on issue, ALTCHA on ~5% of challenges, and integration statuses refresh on visit (stale-while-revalidate). Vercel sends `Authorization: Bearer $CRON_SECRET`. On other hosts call the same URLs from any scheduler with that header (or `x-cron-secret`); `cleanup-assets` and `purge-shared-files` accept either `CRON_SECRET` or `LOVABLE_CRON_SECRET`, compare in constant time and never accept the secret in the URL. Each run drains expired files oldest-first for up to ~20 s, keeps rows whose storage delete failed for the next run, and reports `more: true` when work remains.
 
 ## Telegram
 Register the webhook once with `TELEGRAM_BOT_TOKEN=... bun scripts/telegram-set-webhook.ts https://rout.be` (secret token is derived from the bot token).
