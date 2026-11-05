@@ -11,7 +11,7 @@
  */
 import { canonicalJson } from "./canonical";
 import { isDidKey, signDigest, verifyDigest } from "./did-key";
-import { fromB64u, fromHex, sha256Bytes, sha256Hex, toB64u, utf8 } from "./encoding";
+import { fromB64u, sha256Bytes, sha256Hex, toB64u, utf8 } from "./encoding";
 
 export type Capability = {
   v: 1;
@@ -179,5 +179,3 @@ export function authorizeInvocation(inv: InvocationCheck, cap: unknown, ctx: Cha
   if (!r.leaf.actions.some((a) => actionCovers(a, inv.kind))) return { ok: false, error: "cap_action_denied" };
   return { ok: true, capIds: r.ids };
 }
-
-export { fromHex as _fromHex };
