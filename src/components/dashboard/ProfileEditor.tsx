@@ -1352,6 +1352,7 @@ export function ProfileEditor({ variant = "verified", pageMode = "profile", onPa
                 value={prefs.designLayers}
                 onChange={(v) => setPref("designLayers", v)}
                 blocks={blocks}
+                buttonShape={prefs.buttonShape}
               />
             </Accordion>
           )}

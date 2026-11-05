@@ -95,8 +95,10 @@ function RowTools({ visible, onToggle, onUp, onDown, onDelete }: { visible: bool
 }
 
 /** Layered Design Studio: presets, layer manager, backgrounds, per-block styles and decorations. */
-export function LayerStudioAccordion({ value, onChange, blocks }: Props) {
+export function LayerStudioAccordion({ value, onChange, blocks, buttonShape }: Props) {
   const layers = useMemo(() => normalizeDesignLayers(value || "{}"), [value]);
+  /** The wrap/scroll choice only appears once the logo bar holds more than 5 logos. */
+  const logoCount = countLogoLinks(blocks, resolveLinkMode(layers.linkDisplay, buttonShape));
   const set = (next: DesignLayers) => {
     const n = normalizeDesignLayers(next);
     onChange(isEmptyLayers(n) ? "" : serializeDesignLayers(n));
