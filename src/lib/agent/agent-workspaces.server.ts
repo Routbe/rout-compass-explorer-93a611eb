@@ -61,6 +61,53 @@ export async function previewAgentClaim(userId: string, tokenHash: string): Prom
 
 export type ClaimedApp = { name: string; clientId: string; clientSecret: string };
 
+/** The claim secret the human holds: link token or normalised claim code. Never stored. */
+export type ClaimSecret = { purpose: "token" | "code"; value: string };
+
+/**
+ * Opens a sealed agent draft with the claim secret and stores it as the owner's
+ * normal draft. Conditional on the payload still being sealed, so a retry is a no-op.
+ * Returns the data key (caller wipes it) or null when the draft was not sealed.
+ */
+async function unsealDraftAsOwner(userId: string, workspaceId: string, secret: ClaimSecret): Promise<Uint8Array | null> {
+  const { openDraft, sealedEnvelope, unwrapDataKey } = await import("./agent-draft-seal");
+  return withDbContext({ userId, workspaceId }, async () => {
+    const rows = (await sql`select payload from public.workspace_profile_drafts where workspace_id = ${workspaceId} limit 1`) as Array<{ payload: unknown }>;
+    const env = sealedEnvelope(rows[0]?.payload);
+    if (!env) return null;
+    const dk = await unwrapDataKey(env, secret.purpose, secret.value);
+    const draft = await openDraft(env, dk);
+    await sql`update public.workspace_profile_drafts
+         set payload = ${JSON.stringify(draft)}::jsonb, revision = revision + 1, updated_by = ${userId}, updated_at = now()
+       where workspace_id = ${workspaceId} and payload ? '$sealed'`;
+    return dk;
+  });
+}
+
+/**
+ * Recovery for an interrupted handoff: the claim went through but the draft is
+ * still sealed. Only the claimer's own owned workspaces are tried, and only the
+ * one whose wrap opens with this secret (AES-GCM authenticates it) is restored.
+ */
+export async function recoverSealedAgentDraft(userId: string, secret: ClaimSecret): Promise<{ workspaceId: string; slug: string } | null> {
+  const rows = await withDbContext({ userId, workspaceId: null }, async () =>
+    (await sql`select d.workspace_id, w.slug from public.workspace_profile_drafts d
+        join public.workspace_members m on m.workspace_id = d.workspace_id and m.user_id = ${userId} and m.role = 'owner'
+        join public.workspaces w on w.id = d.workspace_id
+       where d.payload ? '$sealed' order by d.updated_at desc limit 20`) as Array<{ workspace_id: string; slug: string }>,
+  );
+  for (const r of rows) {
+    try {
+      const dk = await unsealDraftAsOwner(userId, r.workspace_id, secret);
+      dk?.fill(0);
+      if (dk) return { workspaceId: r.workspace_id, slug: r.slug };
+    } catch {
+      /* not this workspace's secret */
+    }
+  }
+  return null;
+}
+
 /**
  * Claim (link token or claim code hash): the signed-in human becomes Owner,
  * the sandbox key dies, and the agent's login-app specs become real OAuth
@@ -69,7 +116,8 @@ export type ClaimedApp = { name: string; clientId: string; clientSecret: string 
 export async function claimAgentWorkspace(
   userId: string,
   hash: string,
-): Promise<{ workspaceId: string; slug: string; apps: ClaimedApp[] }> {
+  secret?: ClaimSecret,
+): Promise<{ workspaceId: string; slug: string; apps: ClaimedApp[]; draftRestored: boolean }> {
   const rows = await withDbContext({ userId, workspaceId: null }, async () => {
     try {
       return (await sql`
@@ -85,8 +133,26 @@ export async function claimAgentWorkspace(
   });
   const row = rows[0];
   if (!row) throw new Error("claim_not_found");
+  // Zero-knowledge handoff: the claim secret opens the sealed design and app specs.
+  let pending: unknown = row.pending_apps;
+  let draftRestored = true;
+  if (secret) {
+    const { openApps, sealedEnvelope } = await import("./agent-draft-seal");
+    let dk: Uint8Array | null = null;
+    try {
+      dk = await unsealDraftAsOwner(userId, row.workspace_id, secret);
+      const sid = dk ? (await import("@/lib/neon")) && null : null;
+      void sid;
+      pending = dk ? await openApps(row.pending_apps, dk, await sandboxIdOf(row.pending_apps, userId, row.workspace_id, sealedEnvelope)) : row.pending_apps;
+    } catch (error) {
+      draftRestored = false;
+      console.error("[agent:claim] draft unseal failed:", (error as Error).message);
+    } finally {
+      dk?.fill(0);
+    }
+  }
   const { sandboxAppInput } = await import("./agent-sandbox");
-  const specs = (Array.isArray(row.pending_apps) ? row.pending_apps : [])
+  const specs = (Array.isArray(pending) ? pending : [])
     .map((a) => sandboxAppInput.safeParse(a))
     .filter((r) => r.success)
     .map((r) => r.data);
@@ -116,7 +182,7 @@ export async function claimAgentWorkspace(
       }
     });
   }
-  return { workspaceId: row.workspace_id, slug: row.slug, apps };
+  return { workspaceId: row.workspace_id, slug: row.slug, apps, draftRestored };
 }
 
 /** Cron: hard delete every workspace whose claim expired unclaimed. */
