@@ -60,11 +60,12 @@ export async function sendSecondFactorSms(authUserId: string, code: string): Pro
   return true;
 }
 
-/** True when the Better Auth user is an admin member. */
+/** True when the Better Auth user holds the admin role or any admin permission. */
 export async function authUserIsAdmin(authUserId: string): Promise<boolean> {
-  const rows = (await sql`select 1 from public.user_roles r join public.users u on u.id = r.user_id
-    where (u.auth_user_id::text = ${authUserId} or u.user_metadata->>'neon_auth_id' = ${authUserId})
-      and r.role::text = 'admin' limit 1`) as Row[];
+  const memberId = await memberIdForAuthUser(authUserId);
+  if (!memberId) return false;
+  const rows = (await sql`select 1 from public.user_roles where user_id = ${memberId} and role::text = 'admin'
+    union all select 1 from public.admin_permissions where user_id = ${memberId} limit 1`) as Row[];
   return rows.length > 0;
 }
 
