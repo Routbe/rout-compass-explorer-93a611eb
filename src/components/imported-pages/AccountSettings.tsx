@@ -56,6 +56,8 @@ import { db } from "@/lib/db/client";
 import { updateAuthUser } from "@/lib/auth.functions";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
+import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
+import { withAltcha } from "@/lib/altcha-client";
 import { authClient } from "@/lib/auth-client";
 import { LOCALES, LOCALE_LABELS, useI18n } from "@/lib/i18n";
 import { useLanguagePreference } from "@/hooks/useLanguagePreference";
@@ -112,6 +114,8 @@ export default function AccountSettings() {
   const [mfaDialogOpen, setMfaDialogOpen] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [mfaPassword, setMfaPassword] = useState("");
+  const [smsDialogOpen, setSmsDialogOpen] = useState(false);
+  const [passwordLinkBusy, setPasswordLinkBusy] = useState(false);
   const [mfaUri, setMfaUri] = useState<string | null>(null);
   const [mfaBackup, setMfaBackup] = useState<string[]>([]);
   const [mfaCodesSaved, setMfaCodesSaved] = useState(false);
@@ -253,6 +257,20 @@ export default function AccountSettings() {
     if (res.error) return toast.error(res.error.message ?? "2FA kon niet uitgeschakeld worden.");
     setMfaEnabled(false);
     toast.success(trI18n.t("ui.82418cec7c"));
+  };
+
+  const sendPasswordLink = async () => {
+    if (!user.email) return;
+    setPasswordLinkBusy(true);
+    try {
+      const res = await withAltcha(user.email, (proof) =>
+        authClient.requestPasswordReset({ email: user.email!, redirectTo: "/auth/reset-password", fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      if ((res as { error?: { message?: string } }).error) toast.error((res as { error: { message?: string } }).error.message ?? "Versturen mislukt.");
+      else toast.success(`Link verstuurd naar ${user.email}`);
+    } finally {
+      setPasswordLinkBusy(false);
+    }
   };
 
   const signOutOthers = () => openNeonAccount();
@@ -470,7 +488,7 @@ export default function AccountSettings() {
               <ShieldCheck className="h-4 w-4" /> Security Hub · tweestapsverificatie
             </h2>
             <p className="text-sm text-muted-foreground">
-              ROUT werkt zonder wachtwoord en zonder beveiligingsvragen. Voeg sterke factoren toe; zwakke factoren kunnen die nooit omzeilen.
+              Log in met je passkey, een e-maillink of je wachtwoord. Met tweestapsverificatie aan vragen we na een wachtwoord of e-maillink altijd een tweede stap.
             </p>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-background p-3">
               <div className="min-w-0">
@@ -487,12 +505,24 @@ export default function AccountSettings() {
               </div>
             </div>
             <HardwareKeyPanel />
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border bg-background p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-background p-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium">Sms- en e-mailcodes</p>
-                <p className="text-xs text-muted-foreground">Alleen als terugval. Kwetsbaar voor simkaart-fraude en phishing; ze vervangen nooit je passkey, app of sleutel.</p>
+                <p className="text-sm font-medium">Sms-code</p>
+                <p className="text-xs text-muted-foreground">Een code per sms naar je geverifieerde gsm-nummer. Minder sterk dan een app of passkey (simkaart-fraude); e-mail is nooit een tweede stap.</p>
               </div>
-              <Badge variant="destructive">Lage beveiliging</Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{mfaEnabled ? "2FA actief" : "Inactief"}</Badge>
+                {!mfaEnabled && <Button size="sm" variant="outline" onClick={() => setSmsDialogOpen(true)}>Instellen</Button>}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-background p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Wachtwoord</p>
+                <p className="text-xs text-muted-foreground">Optioneel. We mailen je een link om een wachtwoord in te stellen of te wijzigen; daarna worden je andere apparaten afgemeld.</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={sendPasswordLink} disabled={passwordLinkBusy}>
+                {passwordLinkBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Link mailen"}
+              </Button>
             </div>
           </section>
 
@@ -591,6 +621,16 @@ export default function AccountSettings() {
           </Button>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={smsDialogOpen} onOpenChange={setSmsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Tweestapsverificatie aanzetten</DialogTitle>
+            <DialogDescription>Kies een authenticator-app of sms naar je geverifieerde nummer.</DialogDescription>
+          </DialogHeader>
+          <TwoFactorSetup onEnabled={() => { setMfaEnabled(true); setSmsDialogOpen(false); }} />
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={mfaDialogOpen} onOpenChange={setMfaDialogOpen}>
         <DialogContent>
