@@ -47,12 +47,14 @@
 - [ ] Apply pending db/0204-0207 (owner decision: 0207 quarantines accounts without passkey)
 
 ## Sign-in & 2FA (request 2026-11-05, 3rd)
-- [ ] Admin can sign in again (passkey, e-mail link or password)
-- [ ] Public + admin sign-in: passkey, e-mail link, password (+ reset/set password page)
-- [ ] Second step when 2FA is on: authenticator app, SMS, recovery code or passkey (also after an e-mail link)
-- [ ] 2FA optional for members, mandatory for admins (setup screen before the admin panel; admins cannot switch it off)
-- [ ] SMS as 2FA option for members with a verified phone number
-- [ ] Remove passkey-only quarantine; update tests, AGENTS.md
+- [x] Public + admin sign-in: passkey, e-mail link (+ code), password (+ set/reset password page)
+- [x] Second step when 2FA is on: authenticator app, SMS, recovery code or passkey (also after an e-mail link)
+- [x] 2FA optional for members, mandatory for admins (setup screen before the admin panel; admins cannot switch it off)
+- [x] SMS as 2FA option for members with a verified phone number (settings + admin setup)
+- [x] Removed passkey-only quarantine; tests, README, AGENTS.md updated
+- [x] Fixed 2 older failing tests (merge list, schema snapshot)
+- [ ] Admin sign-in live on rout.dlp.li (blocked: needs a redeploy of this code; preview lacks BETTER_AUTH_SECRET and BREVO_API_KEY)
+- [ ] SMS codes live (blocked: SMS provider keys + PHONE_ENCRYPTION_KEY not set here)
 
 ## Blockers
 - Google Wallet and Spotify keys are not configured here, so live tests against Google and Spotify cannot run.
