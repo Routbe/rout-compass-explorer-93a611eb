@@ -130,3 +130,41 @@ describe("UI-thread isolation", () => {
     expect(importers.map((f) => f.slice(root.length + 1))).toEqual(["lib/crypto-enclave/crypto.worker.ts"]);
   });
 });
+
+describe("protocol identity in the enclave", () => {
+  const userId = "user-protocol-test";
+
+  it("creates a sealed did:key, signs ciphertext-only events and DPoP proofs", async () => {
+    const { verifyEvent } = await import("@/lib/protocol/events");
+    const { verifyDpop } = await import("@/lib/protocol/dpop");
+    const { loadIdentity } = await import("@/lib/protocol/identity-store");
+    const { newStreamId } = await import("@/lib/protocol/events");
+
+    expect(await code("protocol.identity", { userId })).toBe("no_device_key"); // no Master Key unlocked → no signing
+    const { handle } = await call("masterKey.generate", {});
+    await call("masterKey.commitPending", { handle, userId });
+
+    const { did } = await call("protocol.identity", { userId });
+    expect(did.startsWith("did:key:z6Mk")).toBe(true);
+    expect((await call("protocol.identity", { userId })).did).toBe(did);
+    const stored = await loadIdentity(userId);
+    expect(stored?.sealedSecret.startsWith("v1.")).toBe(true);
+
+    const stream = newStreamId();
+    const genesis = await call("protocol.signEvent", { userId, draft: { stream, seq: 0, prev: null, kind: "stream.genesis", body: {} } });
+    expect(await code("protocol.signEvent", { userId, draft: { stream, seq: 1, prev: genesis.hash, kind: "profile.patch", body: { public: { bio: "x" } } } })).toBe("invalid_input");
+
+    const plaintext = new TextEncoder().encode(JSON.stringify({ bio: "TOP-SECRET-BIO" }));
+    const e1 = await call("protocol.sealEvent", { userId, stream, seq: 1, prev: genesis.hash, kind: "profile.patch", plaintext });
+    expect(plaintext.every((b) => b === 0)).toBe(true); // wiped after sealing
+    expect(verifyEvent(e1)).toMatchObject({ ok: true });
+    expect(e1.author).toBe(did);
+    expect(JSON.stringify(e1)).not.toContain("TOP-SECRET-BIO");
+    const opened = await call("protocol.openEvent", { userId, event: e1 });
+    expect(JSON.parse(new TextDecoder().decode(opened.plaintext))).toEqual({ bio: "TOP-SECRET-BIO" });
+
+    const url = "https://rout.be/api/v1/ledger/events";
+    const { proof } = await call("protocol.dpop", { userId, method: "POST", url });
+    expect(verifyDpop(proof, { method: "POST", urls: [url] })).toMatchObject({ ok: true, did });
+  }, 20000);
+});
