@@ -22,6 +22,11 @@ import {
   vaultHkdfBase,
   workspaceConfigAad,
 } from "@/lib/vault/ephemeral-vault";
+import { isStreamId, issueCapability } from "@/lib/protocol/capabilities";
+import { didOfSecretKey, newIdentityKey } from "@/lib/protocol/did-key";
+import { createDpopProof } from "@/lib/protocol/dpop";
+import { signEvent, verifyEvent } from "@/lib/protocol/events";
+import { eventAad, identityAad, loadIdentity, saveIdentity } from "@/lib/protocol/identity-store";
 import type { EnclaveErrorCode, EnclaveOp, EnclaveOps } from "./protocol";
 
 const enc = new TextEncoder();
@@ -97,6 +102,31 @@ async function openBytes(key: CryptoKey, blob: string, aad: string): Promise<Uin
 
 async function deviceKeyFor(userId: string) {
   return (await loadDeviceKey(str(userId, 200))) ?? fail("no_device_key");
+}
+
+/**
+ * Runs `fn` with the member's protocol secret key, creating the identity on
+ * first use. The key exists in memory only for the duration of `fn`.
+ */
+async function withIdentity<T>(userId: string, fn: (sk: Uint8Array, did: string) => Promise<T>): Promise<T> {
+  const dk = await deviceKeyFor(userId);
+  let stored = await loadIdentity(userId);
+  let sk: Uint8Array;
+  if (!stored) {
+    const fresh = newIdentityKey();
+    sk = fresh.secretKey;
+    stored = { did: fresh.did, keyId: dk.keyId, sealedSecret: await sealBytes(dk.key, sk, identityAad(userId, fresh.did)) };
+    await saveIdentity(userId, stored);
+  } else {
+    if (stored.keyId !== dk.keyId) fail("decrypt_failed");
+    sk = await openBytes(dk.key, stored.sealedSecret, identityAad(userId, stored.did));
+  }
+  try {
+    if (sk.length !== 32 || didOfSecretKey(sk) !== stored.did) fail("decrypt_failed");
+    return await fn(sk, stored.did);
+  } finally {
+    wipe(sk);
+  }
 }
 
 async function storeMaster(userId: string, entropy: Uint8Array) {
@@ -281,6 +311,59 @@ export const handlers: Handlers = {
       ledgerKeys.delete(str(keyId));
     }
     return null;
+  },
+
+  async "protocol.identity"({ userId }) {
+    return { did: (await withIdentity(str(userId, 200), async (_sk, did) => did)) };
+  },
+
+  async "protocol.sealEvent"({ userId, stream, seq, prev, kind, plaintext, capId }) {
+    const pt = bytes(plaintext);
+    try {
+      if (!isStreamId(stream) || !Number.isSafeInteger(seq) || seq < 1) fail("invalid_input");
+      const k = str(kind, 64);
+      if (k === "stream.genesis" || k === "cap.revoke" || k.startsWith("pub.")) fail("invalid_input");
+      const dk = await deviceKeyFor(userId);
+      const blob = await sealBytes(dk.key, pt, eventAad(stream, k));
+      return await withIdentity(str(userId, 200), async (sk) =>
+        signEvent(sk, { stream, seq, prev: prev === null ? null : str(prev, 64), kind: k, body: { sealed: { blob, keyId: dk.keyId } }, ...(capId ? { capId: str(capId, 64) } : {}) }),
+      );
+    } finally {
+      wipe(pt);
+    }
+  },
+
+  async "protocol.signEvent"({ userId, draft }) {
+    if (!draft || typeof draft !== "object") fail("invalid_input");
+    const kind = str(draft.kind, 64);
+    if (kind !== "stream.genesis" && kind !== "cap.revoke" && !kind.startsWith("pub.")) fail("invalid_input"); // private kinds go through sealEvent
+    return withIdentity(str(userId, 200), async (sk) => {
+      const e = signEvent(sk, draft);
+      const v = verifyEvent(e);
+      if (!v.ok) fail("invalid_input");
+      return e;
+    });
+  },
+
+  async "protocol.openEvent"({ userId, event }) {
+    const blob = event?.body?.sealed?.blob;
+    if (!isStreamId(event?.stream) || typeof blob !== "string") fail("invalid_input");
+    const dk = await deviceKeyFor(userId);
+    return { plaintext: await openBytes(dk.key, str(blob, 70000), eventAad(event.stream, str(event.kind, 64))) };
+  },
+
+  async "protocol.dpop"({ userId, method, url }) {
+    const m = str(method, 10).toUpperCase();
+    if (!/^(GET|POST|PUT|PATCH|DELETE)$/.test(m)) fail("invalid_input");
+    return withIdentity(str(userId, 200), async (sk) => ({ proof: createDpopProof(sk, m, str(url, 2048)) }));
+  },
+
+  async "protocol.delegate"({ userId, grant, parent }) {
+    if (!grant || typeof grant !== "object") fail("invalid_input");
+    return withIdentity(str(userId, 200), async (sk, did) => {
+      const cap = issueCapability(sk, did, grant, parent ?? null);
+      return cap;
+    });
   },
 
   async "hash.sha256Hex"({ text }) {
