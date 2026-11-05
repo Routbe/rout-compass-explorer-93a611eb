@@ -17,6 +17,6 @@ self.onmessage = async (event: MessageEvent<EnclaveRequest>) => {
   const response: EnclaveResponse = { id: msg.id, ...outcome };
   // Decrypted bytes are transferred (moved), so no copy lingers in the worker.
   const transfer: Transferable[] = [];
-  if (outcome.ok && msg.op === "data.open") transfer.push((outcome.result as { plaintext: Uint8Array }).plaintext.buffer as ArrayBuffer);
+  if (outcome.ok && (msg.op === "data.open" || msg.op === "protocol.openEvent")) transfer.push((outcome.result as { plaintext: Uint8Array }).plaintext.buffer as ArrayBuffer);
   self.postMessage(response, transfer);
 };
