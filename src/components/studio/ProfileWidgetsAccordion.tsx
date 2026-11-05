@@ -17,6 +17,14 @@ import type { ProfileBlock } from "@/lib/profile";
 import type { ProfileDisplayPrefs } from "@/lib/profile-display";
 import type { QaSpace } from "@/components/qa/useQaPublic";
 import { isStudioWidget } from "@/lib/studio-widget-rules";
+import { newBlockId } from "@/lib/profile";
+import { applySharedPlace, isVisualWidget, isWidgetReady, parseWidgetConfig, serializeWidgetConfig, sharedWidgetPlace, LOCATION_WIDGETS, type VisualWidgetKind } from "@/lib/profile-widgets";
+import { VisualWidgetCatalog, VISUAL_WIDGET_ICON } from "./VisualWidgetCatalog";
+import { VisualWidgetSettings } from "./VisualWidgetSettings";
+import { ChevronDown, Trash2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+import type { Dispatch, SetStateAction } from "react";
 
 type SetPref = <K extends keyof ProfileDisplayPrefs>(key: K, value: ProfileDisplayPrefs[K]) => void;
 
@@ -26,6 +34,10 @@ interface Props {
   blocks: ProfileBlock[];
   onOpenBlockChange: (id: string | null) => void;
   onAddKind: (kind: string, value?: string) => void;
+  /** Direct block list access for the visual widgets (add, configure, size, remove). */
+  onBlocksChange?: Dispatch<SetStateAction<ProfileBlock[]>>;
+  /** City from the profile location badge; location widgets default to it. */
+  profileCity?: string | null;
   /** Zet een profielwidget aan vanuit de catalogus. */
   onWidget?: (id: WidgetId) => void;
   /** Zorgt dat een sectieblok bestaat zonder de editor te openen. */
@@ -63,9 +75,25 @@ export function ProfileWidgetsAccordion({
   avatarUrl,
   prefs,
   onPref,
+  onBlocksChange,
+  profileCity,
 }: Props) {
   const { t } = useTranslation();
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [openWidget, setOpenWidget] = useState<string | null>(null);
+  const visualBlocks = blocks.filter((b) => isVisualWidget(b.kind));
+  const sharedPlace = sharedWidgetPlace(blocks);
+  const patchBlock = (id: string, next: Partial<ProfileBlock>) => onBlocksChange?.((list) => list.map((b) => (b.id === id ? { ...b, ...next } : b)));
+  const addVisual = (kind: VisualWidgetKind) => {
+    if (!onBlocksChange) return;
+    const id = newBlockId();
+    // Location widgets start with the shared city, so it is entered only once.
+    const value = (LOCATION_WIDGETS as readonly string[]).includes(kind) && sharedPlace ? serializeWidgetConfig({ place: sharedPlace }) : "{}";
+    const size = kind === "wg_weather" || kind === "wg_clock" || kind === "wg_birthday" ? "small" as const : undefined;
+    onBlocksChange((list) => [...list, { id, kind, label: t(`studio.vw.kind.${kind}`), value, ...(size ? { size } : {}) }]);
+    setOpenWidget(id);
+  };
 
   const sizedBlocks = blocks.filter(
     (b) => isStudioWidget(b.kind),
@@ -132,6 +160,64 @@ export function ProfileWidgetsAccordion({
             <BadgeActivityPanel />
           </StudioToggleCard>
         </div>
+
+        {/* Visuele widgets: eigen catalogus, instellingen en tegelformaat. */}
+        {onBlocksChange && (
+          <div className="space-y-3 border-t border-border pt-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("studio.vw.section")}</p>
+              <p className="text-xs text-muted-foreground">{t("studio.vw.sectionHelp")}</p>
+            </div>
+            {visualBlocks.length > 0 && (
+              <ul className="space-y-2">
+                {visualBlocks.map((b) => {
+                  const kind = b.kind as VisualWidgetKind;
+                  const Icon = VISUAL_WIDGET_ICON[kind];
+                  const open = openWidget === b.id;
+                  const ready = isWidgetReady(kind, parseWidgetConfig(b.value));
+                  return (
+                    <li key={b.id} className={cn("rounded-xl border border-border bg-background p-3", b.hidden && "opacity-60")}>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40"><Icon className="h-4 w-4" aria-hidden /></span>
+                        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpenWidget(open ? null : b.id)} aria-expanded={open}>
+                          <span className="block truncate text-sm font-medium">{b.label || t(`studio.vw.kind.${kind}`)}</span>
+                          <span className={cn("block truncate text-[11px]", ready ? "text-muted-foreground" : "text-destructive")}>{ready ? t(`studio.vw.kind.${kind}`) : t("studio.vw.needsSetup")}</span>
+                        </button>
+                        <Switch checked={!b.hidden} onCheckedChange={(on) => patchBlock(b.id, { hidden: !on })} aria-label={b.hidden ? t("studio.links.show") : t("studio.links.hide")} className="shrink-0" />
+                        <button type="button" aria-label={t("studio.links.settings")} onClick={() => setOpenWidget(open ? null : b.id)} className="shrink-0 rounded-lg p-1 text-muted-foreground hover:bg-muted">
+                          <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+                        </button>
+                      </div>
+                      {open && (
+                        <div className="mt-3 space-y-3 border-t border-border pt-3">
+                          <VisualWidgetSettings
+                            kind={kind}
+                            label={b.label}
+                            value={b.value}
+                            size={b.size}
+                            onChange={(value) => patchBlock(b.id, { value })}
+                            onTitle={(label) => patchBlock(b.id, { label })}
+                            onSize={(size) => patchBlock(b.id, { size })}
+                            sharedPlace={sharedPlace}
+                            profileCity={profileCity ?? null}
+                            onPlace={(place) => onBlocksChange((list) => applySharedPlace(list, b.id, place))}
+                          />
+                          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => { onBlocksChange((list) => list.filter((x) => x.id !== b.id)); setOpenWidget(null); }}>
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden /> {t("studio.links.delete")}
+                          </Button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <Button type="button" className="min-h-12 w-full gap-2 text-sm" onClick={() => setCatalogOpen(true)}>
+              <Plus className="h-4 w-4" aria-hidden /> {t("studio.vw.add")}
+            </Button>
+            <VisualWidgetCatalog open={catalogOpen} onClose={() => setCatalogOpen(false)} onPick={addVisual} />
+          </div>
+        )}
 
         {/* Afmetingen per widgetblok */}
         {sizedBlocks.length > 0 && (
