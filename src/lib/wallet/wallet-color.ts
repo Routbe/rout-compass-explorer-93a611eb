@@ -98,6 +98,24 @@ export function harmonizeBackground(hex: string | null | undefined): Hex6 {
   return oklchToHex({ L, C, h: neutral ? 4.4 /* faint cool blue-grey */ : lch.h });
 }
 
+/**
+ * Pass background from the whole profile palette: the profile canvas and accent are
+ * mixed in OKLab (perceptually even, 65 % canvas / 35 % accent) and the mix is then
+ * pulled into the matte band. A neutral canvas therefore picks up a hint of the accent,
+ * a coloured canvas keeps its own hue.
+ */
+export function harmonizeProfileBackground(profileBg: string | null | undefined, accent: string | null | undefined): Hex6 {
+  const p = parseHex(profileBg ?? "");
+  const a = parseHex(accent ?? "");
+  if (!p) return harmonizeBackground(accent);
+  if (!a) return harmonizeBackground(profileBg);
+  const lp = rgbToOklab(p);
+  const la = rgbToOklab(a);
+  const w = 0.65;
+  const mix = { L: lp.L * w + la.L * (1 - w), a: lp.a * w + la.a * (1 - w), b: lp.b * w + la.b * (1 - w) };
+  return harmonizeBackground(oklchToHex(oklabToLch(mix)));
+}
+
 /** Ambient glow tone behind the crest, same hue family as the background. */
 export function harmonizeGlow(hex: string | null | undefined): Hex6 {
   const lch = hexToOklch(hex ?? "");

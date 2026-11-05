@@ -76,6 +76,7 @@ export async function generateWalletPayload(
         space,
         displayName: (p["display_name"] as string | null) ?? null,
         tagline: (p["tagline"] as string | null) ?? null,
+        verified: space === "root" && p["verified"] === true,
         ...(await (async () => {
           const { profileSurface } = await import("@/lib/profile-surface");
           const { parseDisplayPrefs } = await import("@/lib/profile-display");

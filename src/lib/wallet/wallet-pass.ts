@@ -168,6 +168,8 @@ export type WalletCardPayload = {
   heroImageUrl: string | null;
   /** Short public card number, derived from a hash (never the raw account id). */
   sovereignId: string;
+  /** Verified root identity (public fact already shown on the profile). */
+  verified?: boolean;
 };
 
 export const WALLET_DEFAULT_SUBHEADER = "Sovereign Profile Hub";
@@ -194,7 +196,7 @@ export function walletImageUrl(src: string | null, base: string): string | null 
 }
 
 export function walletCardPayload(
-  p: { handle: string; space: "root" | "alias"; displayName: string | null; tagline: string | null; themeBg: string | null; avatarSrc: string | null; accent?: string | null },
+  p: { handle: string; space: "root" | "alias"; displayName: string | null; tagline: string | null; themeBg: string | null; avatarSrc: string | null; accent?: string | null; verified?: boolean | null },
   base: string,
   sovereignId: string,
   /** Handle-independent seed so a renamed handle keeps the same saved pass. */
@@ -219,6 +221,7 @@ export function walletCardPayload(
     accentHex: accent,
     heroImageUrl: walletImageUrl(p.avatarSrc, base),
     sovereignId,
+    ...(p.verified && p.space === "root" ? { verified: true } : {}),
   };
 }
 
