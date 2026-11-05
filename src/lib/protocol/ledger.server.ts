@@ -86,7 +86,7 @@ export async function handleAppend(request: Request, store: LedgerStore, opts: {
   if (!payload || typeof payload !== "object") return ledgerError(400, "invalid_json");
 
   const caller = await proveCaller(request, store, opts.publicOrigin);
-  if ("error" in caller) return caller.error;
+  if (caller.error) return caller.error;
 
   const v = verifyEvent(payload.event, opts.now);
   if (!v.ok) return ledgerError(v.error === "event_signature_invalid" ? 401 : 422, v.error);
@@ -127,7 +127,7 @@ export async function handleAppend(request: Request, store: LedgerStore, opts: {
 export async function handleRead(request: Request, streamId: string, store: LedgerStore, opts: { publicOrigin?: string | null; now?: number } = {}): Promise<Response> {
   if (!isStreamId(streamId)) return ledgerError(400, "invalid_stream");
   const caller = await proveCaller(request, store, opts.publicOrigin);
-  if ("error" in caller) return caller.error;
+  if (caller.error) return caller.error;
   const head = await store.head(streamId);
   if (!head) return ledgerError(404, "unknown_stream");
   if (caller.did !== head.controller) {
