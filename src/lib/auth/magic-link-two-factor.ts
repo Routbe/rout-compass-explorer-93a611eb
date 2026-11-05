@@ -10,7 +10,7 @@
  * `GET /two-factor/options` tells the sign-in page which second steps exist for
  * the pending challenge (or the signed-in member), without exposing secrets.
  */
-import { createAuthEndpoint, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { deleteSessionCookie } from "better-auth/cookies";
 import { generateRandomString } from "better-auth/crypto";
 import { secondFactorMethods, type SecondFactorFacts } from "./sign-in-policy";
@@ -43,7 +43,7 @@ type Ctx = {
   setSignedCookie: (name: string, value: string, secret: string, attrs: Record<string, unknown>) => Promise<unknown>;
   getSignedCookie: (name: string, secret: string) => Promise<string | null | false>;
   redirect: (url: string) => Error;
-  json: (body: unknown, init?: { status?: number }) => unknown;
+  json: (body: unknown) => unknown;
 };
 
 export function magicLinkTwoFactor(options: Options) {
@@ -88,11 +88,10 @@ export function magicLinkTwoFactor(options: Options) {
           }
         }
         if (!authUserId) {
-          const { getSessionFromCtx } = await import("better-auth/api");
           const session = await getSessionFromCtx(raw as never).catch(() => null);
           authUserId = (session as { user?: { id?: string } } | null)?.user?.id ?? null;
         }
-        if (!authUserId) return ctx.json({ code: "no_challenge", message: "Er loopt geen aanmelding." }, { status: 401 });
+        if (!authUserId) throw new APIError("UNAUTHORIZED", { code: "NO_CHALLENGE", message: "Er loopt geen aanmelding." });
         const facts = await options.describe(authUserId);
         return ctx.json({ pending, methods: secondFactorMethods(facts), smsTo: facts.smsTo });
       }),
