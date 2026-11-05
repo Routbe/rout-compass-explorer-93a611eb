@@ -31,6 +31,21 @@
    - [ ] Set OMNI_RENDER_HOSTS on the worker server (blocked: server environment is outside this project)
    - [x] Verify cleanup cron for temporary QR files and expired uploads
 
+## E2EVSP protocol (request 2026-11-05, 2nd)
+- [x] Signed (Ed25519 did:key), hash-chained events; server checks signature + chain only, stores ciphertext
+- [x] Append-only ledger in Neon (db/0208 applied; edits/deletes blocked by trigger, verified live)
+- [x] Capability documents for agents (attenuating delegation, revocation as signed event)
+- [x] DPoP proofs on every ledger request (one-time, bound to method + URL + key)
+- [x] Identity key + signing + DPoP inside the encryption worker
+- [x] Owner passkey bootstrap link (scripts/owner-passkey-link.ts), no password
+- [x] Test workspaces e2e-agent-*: none found in Neon, nothing to delete
+- [x] Parental consent / email forwarding / referrals / newsletter pages: already exist in NL+EN(+FR/DE), in sitemap, linked at sign-up
+- [ ] Move profile/workspace data into the ledger and drop the old tables (blocked: each member's browser must re-encrypt their own data first; dropping now deletes 29 accounts)
+- [ ] Local SQLite (Wasm) store in the worker (waits on the data move above)
+- [ ] Replace rsk_ agent keys and Sign in with ROUT (OAuth) by capabilities (blocked: breaks connected apps; needs migration window)
+- [ ] Replace Better Auth by native WebAuthn + DPoP sessions (blocked: 28 of 29 accounts have no passkey yet)
+- [ ] Apply pending db/0204-0207 (owner decision: 0207 quarantines accounts without passkey)
+
 ## Blockers
 - Google Wallet and Spotify keys are not configured here, so live tests against Google and Spotify cannot run.
 - No daily scheduler is committed (`vercel.json` absent); the owner must schedule `cleanup-assets`.
