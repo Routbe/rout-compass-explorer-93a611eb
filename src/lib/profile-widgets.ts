@@ -39,6 +39,10 @@ export interface WidgetConfig {
   text?: string;
   date?: string;
   caption?: string;
+  /** Countdown widget: a yearly birthday (default) or a one-off event. */
+  mode?: "birthday" | "event";
+  /** Clock widget: 24-hour (default) or 12-hour notation. */
+  hour12?: boolean;
 }
 
 export function parseWidgetConfig(value: string): WidgetConfig {
@@ -62,6 +66,8 @@ export function parseWidgetConfig(value: string): WidgetConfig {
     if (typeof raw["text"] === "string") out.text = raw["text"].slice(0, 2000);
     if (typeof raw["date"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw["date"])) out.date = raw["date"];
     if (typeof raw["caption"] === "string") out.caption = raw["caption"].slice(0, 200);
+    if (raw["mode"] === "birthday" || raw["mode"] === "event") out.mode = raw["mode"];
+    if (typeof raw["hour12"] === "boolean") out.hour12 = raw["hour12"];
     return out;
   } catch {
     return {};
@@ -80,6 +86,96 @@ export function daysUntilBirthday(date: string, now: Date): number | null {
   let next = Date.UTC(now.getFullYear(), month, day);
   if (next < today) next = Date.UTC(now.getFullYear() + 1, month, day);
   return Math.round((next - today) / 86_400_000);
+}
+
+/** Days until a one-off date (0 = today, negative = already past). */
+export function daysUntilDate(date: string, now: Date): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return null;
+  const target = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - today) / 86_400_000);
+}
+
+/** Days shown by the countdown widget: yearly for birthdays, once for events. */
+export function countdownDays(config: WidgetConfig, now: Date): number | null {
+  if (!config.date) return null;
+  return config.mode === "event" ? daysUntilDate(config.date, now) : daysUntilBirthday(config.date, now);
+}
+
+/** Direct images only (no pages): https and a common image extension or a first-party upload. */
+export function isImageUrl(url: string): boolean {
+  if (url.startsWith("/api/public/")) return true;
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && /\.(avif|gif|jpe?g|png|webp)$/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export type WidgetUrlCheck = "ok" | "empty" | "not_https" | "unsupported";
+
+/** Live validation of the link field of a URL-based widget. */
+export function checkWidgetUrl(kind: VisualWidgetKind, url: string): WidgetUrlCheck {
+  const value = url.trim();
+  if (!value) return "empty";
+  if (!/^https:\/\//i.test(value) && !value.startsWith("/api/public/")) return "not_https";
+  const ok =
+    kind === "wg_post" ? postEmbed(value) !== null
+    : kind === "wg_music" ? musicEmbed(value) !== null
+    : kind === "wg_video" ? videoEmbed(value) !== null
+    : kind === "wg_photo" ? isImageUrl(value)
+    : true;
+  return ok ? "ok" : "unsupported";
+}
+
+/** A widget only renders once it has what it needs; unfinished ones stay hidden on the public page. */
+export function isWidgetReady(kind: VisualWidgetKind, config: WidgetConfig): boolean {
+  switch (kind) {
+    case "wg_weather":
+    case "wg_clock":
+    case "wg_map":
+      return Boolean(config.place);
+    case "wg_post":
+    case "wg_music":
+    case "wg_video":
+    case "wg_photo":
+      return Boolean(config.url) && checkWidgetUrl(kind, config.url ?? "") === "ok";
+    case "wg_birthday":
+      return Boolean(config.date);
+    case "wg_text":
+      return Boolean(config.text?.trim());
+  }
+}
+
+/** The one shared city: the first location widget that already has a place. */
+export function sharedWidgetPlace(blocks: readonly { kind: string; value: string }[]): WidgetPlace | null {
+  for (const b of blocks) {
+    if (!(LOCATION_WIDGETS as readonly string[]).includes(b.kind)) continue;
+    const place = parseWidgetConfig(b.value).place;
+    if (place) return place;
+  }
+  return null;
+}
+
+/** Applies a newly picked city to this widget and to every location widget that has none yet. */
+export function applySharedPlace<T extends { id: string; kind: string; value: string }>(blocks: T[], id: string, place: WidgetPlace): T[] {
+  return blocks.map((b) => {
+    if (!(LOCATION_WIDGETS as readonly string[]).includes(b.kind)) return b;
+    const config = parseWidgetConfig(b.value);
+    if (b.id !== id && config.place) return b;
+    return { ...b, value: serializeWidgetConfig({ ...config, place }) };
+  });
+}
+
+/** Local time at a place, e.g. "14:05". */
+export function formatLocalTime(timezone: string, now: Date, hour12 = false, locale = "nl-BE"): string {
+  try {
+    return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12, timeZone: timezone }).format(now);
+  } catch {
+    return "";
+  }
 }
 
 export type PostEmbed =
