@@ -43,6 +43,10 @@ import {
   blockHref,
   isPromoBlock,
   isWidgetBlock,
+  isPlainLinkKind,
+  blockDisplay,
+  resolveLinkMode,
+  logoBarLayout,
   scheduledBlocks,
   applyVisibilityRules,
   liveStateFromPresence,
@@ -58,6 +62,9 @@ import {
   isBookingUrl,
 } from "@/components/profile/ProfileWidgets";
 import { BookingCard } from "@/components/profile/BookingCard";
+import { VisualWidgetCard } from "@/components/profile/VisualWidgetCard";
+import { DragMarquee } from "@/components/community/DragMarquee";
+import { isVisualWidget } from "@/lib/profile-widgets";
 import { CountdownCard } from "@/components/profile/CountdownCard";
 import { toast } from "sonner";
 import { parseBookingConfig } from "@/lib/booking";
@@ -227,9 +234,11 @@ export function ProfileView({
     const out = glass ? { ...(withText ?? {}), ...glass } : withText;
     return out && !isPlainLinkKind(kind) ? clampWidgetRadius(out) : out;
   };
-  const linkMode = layers.linkDisplay ?? (prefs.buttonShape === "icon" ? "icons" : prefs.buttonShape === "bar" ? "rows" : "both");
+  const linkMode = resolveLinkMode(layers.linkDisplay, prefs.buttonShape);
   const iconOnly = false;
-  const iconLinks = blocks.filter((b) => isPlainLinkBlock(b) && !b.hidden);
+  /** Per link: a button row, a logo in the bar under the bio, or both. */
+  const iconLinks = blocks.filter((b) => isPlainLinkBlock(b) && !b.hidden && blockDisplay(b, linkMode).icon);
+  const iconBar = logoBarLayout(iconLinks.length, layers.iconBarMode);
   /** Eigen canvas- en patroonkleuren overschrijven het thema, indien gekozen. */
   const canvas = {
     ...t,
@@ -562,17 +571,24 @@ export function ProfileView({
         )}
 
         </div>
-        {linkMode !== "rows" && iconLinks.length > 0 && (
-          <nav aria-label={tx("profile.links", { defaultValue: "Links" })} className="mt-4 flex max-w-sm flex-wrap items-center justify-center gap-2.5">
-            {iconLinks.map((b) => (
+        {iconLinks.length > 0 && (() => {
+          const logo = (b: ProfileBlock) => (
               <a key={b.id} href={blockHref(b)} target="_blank" rel="noopener noreferrer" onClick={() => trackClick(b.id, b.label)} aria-label={b.label} title={b.label}
-                className={cn("flex h-11 w-11 items-center justify-center transition-transform hover:-translate-y-0.5", ctaClass(b.id))}
+                className={cn("flex h-11 w-11 shrink-0 items-center justify-center transition-transform hover:-translate-y-0.5", ctaClass(b.id))}
                 style={{ ...styleFor(b.kind), borderRadius: 999, padding: 0, minHeight: 0 }}>
                 {b.thumbnailUrl ? <img src={b.thumbnailUrl} alt="" className="h-6 w-6 rounded-full object-cover" loading="lazy" /> : <SocialPlatformIcon source={blockHref(b) || b.kind} iconMode={b.iconMode} className="h-5 w-5 text-current" />}
               </a>
-            ))}
-          </nav>
-        )}
+          );
+          return iconBar === "scroll" ? (
+            <nav aria-label={tx("profile.links", { defaultValue: "Links" })} className="mt-4 w-full max-w-sm" data-logo-bar="scroll">
+              <DragMarquee speed={24}>{iconLinks.map(logo)}</DragMarquee>
+            </nav>
+          ) : (
+            <nav aria-label={tx("profile.links", { defaultValue: "Links" })} className="mt-4 flex max-w-sm flex-wrap items-center justify-center gap-2.5" data-logo-bar="wrap">
+              {iconLinks.map(logo)}
+            </nav>
+          );
+        })()}
         {profile.username && <ProfilePageTabs handle={profile.username} theme={t} />}
         {profile.fediverse && <a href={profile.fediverse.url} rel="me noopener noreferrer" target="_blank" className="mt-2 inline-flex max-w-full items-center gap-1.5 text-sm text-foreground">
           <span className="truncate">Mastodon</span>
@@ -708,7 +724,7 @@ export function ProfileView({
             <p className="text-center text-sm" style={{ color: t.muted }}>
                {tx("profile.noLinks")} </p>
           )}
-          {blocks.filter((b) => linkMode !== "icons" || !isPlainLinkBlock(b)).map((b) => bentoCell(b,
+          {blocks.filter((b) => !isPlainLinkBlock(b) || blockDisplay(b, linkMode).button).map((b) => bentoCell(b,
             b.kind === "widget:questions" ? (
               profile.username && qaSpace && prefs.questionsEnabled && prefs.qaOnHub ? <div key={b.id} className="w-full"><ProfileQuestions handle={profile.username} space={qaSpace} theme={t} prefs={prefs} preview={preview} /></div> : null
             ) : b.kind === "widget:guestbook" ? (
@@ -744,7 +760,9 @@ export function ProfileView({
                 accent={t.accent ?? t.border ?? "currentColor"}
               />
             ) : isWidgetBlock(b.kind) || isBookingUrl(blockHref(b)) ? (
-              b.kind === "countdown" ? (
+              isVisualWidget(b.kind) ? (
+                <VisualWidgetCard key={b.id} kind={b.kind} label={b.label} value={b.value} style={styleFor(b.kind)} />
+              ) : b.kind === "countdown" ? (
                 <CountdownCard key={b.id} label={b.label} value={b.value} style={styleFor(b.kind)} />
               ) : b.kind === "media_gallery" ? (
                 <GalleryCard key={b.id} config={parseGalleryConfig(b.value)} style={styleFor(b.kind)} />
@@ -1041,10 +1059,6 @@ function ProfileStatus({ handle, prefs, background }: {
   );
 }
 
-const NON_LINK_KINDS = new Set(["feedback", "live", "spacer", "text", "event_list", "newsletter", "booking_request", "faq_accordion", "map_embed", "vcard", "contact_form"]);
-function isPlainLinkKind(kind: string) {
-  return !kind.startsWith("widget:") && !NON_LINK_KINDS.has(kind) && !isPromoBlock(kind) && !isWidgetBlock(kind) && !isProfileSectionKind(kind);
-}
 /** A block that renders as an ordinary outbound link (bar or icon). */
 function isPlainLinkBlock(b: ProfileBlock) {
   return isPlainLinkKind(b.kind) && !isBookingUrl(blockHref(b)) && /^(https?:|mailto:|tel:)/.test(blockHref(b));

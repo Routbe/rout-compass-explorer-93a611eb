@@ -48,6 +48,8 @@ export async function registerSandbox(input: { challenge: string; solution: stri
 }
 
 export type SandboxContext = {
+  /** Raw `rsk_` key of this request: derives the draft unwrap key, never stored or logged. */
+  key: string;
   keyHash: string;
   sandboxId: string;
   agentName: string;
@@ -70,16 +72,19 @@ export async function authenticateSandbox(request: Request): Promise<SandboxCont
   }>;
   const r = rows[0];
   if (!r) return agentError(401, "invalid_token", "This sandbox key is invalid, expired or already claimed.");
-  return { keyHash, sandboxId: r.sandbox_id, agentName: r.agent_name, workspaceId: r.workspace_id, slug: r.slug, expiresAt: r.expires_at };
+  return { key: token, keyHash, sandboxId: r.sandbox_id, agentName: r.agent_name, workspaceId: r.workspace_id, slug: r.slug, expiresAt: r.expires_at };
 }
 
 export async function provisionSandboxWorkspace(ctx: SandboxContext, input: { name: string; slug: string; description?: string }) {
   const token = generateClaimToken(rnd);
   const code = generateClaimCode(rnd);
   const draft = seedWorkspaceStudio({ slug: input.slug, name: input.name, avatarUrl: null }, null);
+  // Encrypted at rest until a human claims it: only the agent key, the link or the code can open it.
+  const { createEnvelope, SEAL_MARKER } = await import("./agent-draft-seal");
+  const sealed = { [SEAL_MARKER]: await createEnvelope(draft, { key: ctx.key, token, code: normalizeClaimCode(code)! }, ctx.sandboxId) };
   const rows = (await sql`select workspace_id, slug, expires_at from public.rout_agent_sandbox_provision(
       ${ctx.keyHash}, ${input.name}, ${input.slug}, ${input.description ?? null},
-      ${await hashClaimToken(token)}, ${await sha256Hex(claimCodeHashInput(normalizeClaimCode(code)!))}, ${JSON.stringify(draft)}::jsonb)`) as Array<{
+      ${await hashClaimToken(token)}, ${await sha256Hex(claimCodeHashInput(normalizeClaimCode(code)!))}, ${JSON.stringify(sealed)}::jsonb)`) as Array<{
     workspace_id: string; slug: string; expires_at: string;
   }>;
   const row = rows[0];
@@ -87,24 +92,64 @@ export async function provisionSandboxWorkspace(ctx: SandboxContext, input: { na
   return { workspaceId: row.workspace_id, slug: row.slug, expiresAt: row.expires_at, claimToken: token, claimCode: code };
 }
 
-export async function setSandboxApps(ctx: SandboxContext, apps: SandboxAppSpec[]): Promise<number> {
-  const rows = (await sql`select public.rout_agent_sandbox_set_apps(${ctx.keyHash}, ${JSON.stringify(apps)}::jsonb) as n`) as Array<{ n: number }>;
-  return Number(rows[0]?.n ?? 0);
-}
-
-export async function patchSandboxProfile(ctx: SandboxContext, fields: Record<string, unknown>, prefs: Record<string, unknown>): Promise<number> {
-  const rows = (await sql`select revision from public.rout_agent_sandbox_patch_draft(
-      ${ctx.keyHash}, ${JSON.stringify(fields)}::jsonb, ${JSON.stringify(prefs)}::jsonb)`) as Array<{ revision: number }>;
-  const row = rows[0];
-  if (!row) throw new Error("sandbox_invalid");
-  return Number(row.revision);
-}
-
-export async function readSandboxState(ctx: SandboxContext) {
+async function rawSandboxState(ctx: SandboxContext) {
   const rows = (await sql`select draft, revision, apps from public.rout_agent_sandbox_state(${ctx.keyHash})`) as Array<{
     draft: unknown; revision: number; apps: unknown;
   }>;
   return rows[0] ?? null;
+}
+
+/** Runs `fn` with the unwrapped data key of a sealed draft; the key is wiped afterwards. */
+async function withDataKey<T>(ctx: SandboxContext, draft: unknown, fn: (dk: Uint8Array | null, env: import("./agent-draft-seal").Envelope | null) => Promise<T>): Promise<T> {
+  const { sealedEnvelope, unwrapDataKey } = await import("./agent-draft-seal");
+  const env = sealedEnvelope(draft);
+  if (!env) return fn(null, null); // provisioned before encryption at rest: stays plaintext until it expires
+  const dk = await unwrapDataKey(env, "key", ctx.key);
+  try {
+    return await fn(dk, env);
+  } finally {
+    dk.fill(0);
+  }
+}
+
+export async function setSandboxApps(ctx: SandboxContext, apps: SandboxAppSpec[]): Promise<number> {
+  const state = await rawSandboxState(ctx);
+  if (!state) throw new Error("sandbox_invalid");
+  const { sealApps } = await import("./agent-draft-seal");
+  const stored = await withDataKey(ctx, state.draft, async (dk, env) => (dk && env && apps.length ? sealApps(apps, dk, env.sid) : apps));
+  await sql`select public.rout_agent_sandbox_set_apps(${ctx.keyHash}, ${JSON.stringify(stored)}::jsonb) as n`;
+  return apps.length;
+}
+
+export async function patchSandboxProfile(ctx: SandboxContext, fields: Record<string, unknown>, prefs: Record<string, unknown>): Promise<number> {
+  const state = await rawSandboxState(ctx);
+  if (!state) throw new Error("sandbox_invalid");
+  const { mergeDraftPatch, openDraft, resealDraft, SEAL_MARKER } = await import("./agent-draft-seal");
+  const [patchFields, patchPrefs] = await withDataKey(ctx, state.draft, async (dk, env) => {
+    if (!dk || !env) return [fields, prefs] as const;
+    const next = mergeDraftPatch(await openDraft(env, dk), fields, prefs);
+    // The db function merges shallowly, so replacing the marker key swaps the whole ciphertext.
+    return [{ [SEAL_MARKER]: await resealDraft(env, dk, next) }, {}] as const;
+  });
+  const rows = (await sql`select revision from public.rout_agent_sandbox_patch_draft(
+      ${ctx.keyHash}, ${JSON.stringify(patchFields)}::jsonb, ${JSON.stringify(patchPrefs)}::jsonb)`) as Array<{ revision: number }>;
+  const row = rows[0];
+  if (!row) throw new Error("sandbox_invalid");
+  // A parallel patch from the same agent would have been overwritten: say so instead of hiding it.
+  if (Number(row.revision) !== Number(state.revision) + 1) throw new Error("draft_conflict");
+  return Number(row.revision);
+}
+
+/** Decrypted view for the agent holding the key. */
+export async function readSandboxState(ctx: SandboxContext) {
+  const state = await rawSandboxState(ctx);
+  if (!state) return null;
+  const { openApps, openDraft } = await import("./agent-draft-seal");
+  return withDataKey(ctx, state.draft, async (dk, env) => ({
+    draft: dk && env ? await openDraft(env, dk) : state.draft,
+    revision: state.revision,
+    apps: await openApps(state.apps, dk, env?.sid ?? null),
+  }));
 }
 
 /** QR code (SVG) for the claim link, drawn by ROUT itself. */

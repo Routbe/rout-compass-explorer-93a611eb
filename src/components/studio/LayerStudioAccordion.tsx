@@ -30,13 +30,15 @@ import {
   type Decoration,
   type DesignLayers,
 } from "@/lib/design-layers";
-import type { ProfileBlock } from "@/lib/profile";
+import { countLogoLinks, LOGO_BAR_CHOICE_FROM, resolveLinkMode, type ProfileBlock } from "@/lib/profile";
 import { cn } from "@/lib/utils";
 
 type Props = {
   value: string;
   onChange: (next: string) => void;
   blocks: ProfileBlock[];
+  /** Legacy button shape, used for the default link display. */
+  buttonShape?: string;
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -93,8 +95,10 @@ function RowTools({ visible, onToggle, onUp, onDown, onDelete }: { visible: bool
 }
 
 /** Layered Design Studio: presets, layer manager, backgrounds, per-block styles and decorations. */
-export function LayerStudioAccordion({ value, onChange, blocks }: Props) {
+export function LayerStudioAccordion({ value, onChange, blocks, buttonShape }: Props) {
   const layers = useMemo(() => normalizeDesignLayers(value || "{}"), [value]);
+  /** The wrap/scroll choice only appears once the logo bar holds more than 5 logos. */
+  const logoCount = countLogoLinks(blocks, resolveLinkMode(layers.linkDisplay, buttonShape));
   const set = (next: DesignLayers) => {
     const n = normalizeDesignLayers(next);
     onChange(isEmptyLayers(n) ? "" : serializeDesignLayers(n));
@@ -135,6 +139,32 @@ export function LayerStudioAccordion({ value, onChange, blocks }: Props) {
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="rows">Linkbalken</SelectItem><SelectItem value="icons">Pictogrammen onder bio</SelectItem><SelectItem value="both">Balken en pictogrammen</SelectItem></SelectContent>
           </Select>
+          {logoCount >= LOGO_BAR_CHOICE_FROM && (
+            <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+              <Label>Logobalk onder je bio ({logoCount} logo's)</Label>
+              <div role="radiogroup" aria-label="Logobalk onder je bio" className="grid grid-cols-2 gap-2">
+                {([
+                  ["wrap", "Onder elkaar doorlopen", "Extra rijen, alles meteen zichtbaar."],
+                  ["scroll", "Horizontale schuifbalk", "Eén rij die bezoekers vloeiend opzij vegen."],
+                ] as const).map(([mode, title, help]) => {
+                  const active = (layers.iconBarMode ?? "wrap") === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => set({ ...layers, iconBarMode: mode })}
+                      className={cn("rounded-lg border p-2.5 text-left transition-colors", active ? "border-foreground bg-background" : "border-border hover:bg-muted")}
+                    >
+                      <span className="block text-sm font-medium">{title}</span>
+                      <span className="block text-[11px] text-muted-foreground">{help}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </section>
         {/* Presets */}
         <section className="space-y-2">

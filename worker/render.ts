@@ -1,5 +1,6 @@
 import { chromium } from "playwright-core";
 import { safeFetch, publicAddress } from "./fetch";
+import { renderHosts } from "./render-hosts";
 
 /** All page networking is intercepted and fulfilled by DNS-pinned safeFetch.
  * A dead browser proxy blocks routes not handled here; service workers, sockets,
@@ -7,7 +8,7 @@ import { safeFetch, publicAddress } from "./fetch";
  */
 export async function renderedMetadata(raw: string, transport = safeFetch): Promise<string> {
   const target = new URL(raw);
-  const allowedHosts = new Set((process.env.OMNI_RENDER_HOSTS ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
+  const allowedHosts = renderHosts();
   if (!allowedHosts.has(target.hostname.toLowerCase()) || target.protocol !== "https:" || target.username || target.password || (target.port && target.port !== "443")) throw new Error("unsafe");
   const browser = await chromium.launch({ headless: true, chromiumSandbox: true,
     ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
@@ -44,6 +45,6 @@ export async function renderedMetadata(raw: string, transport = safeFetch): Prom
 export function renderEnabled(raw: string): boolean {
   try {
     const host = new URL(raw).hostname.toLowerCase();
-    return (process.env.OMNI_RENDER_HOSTS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).includes(host);
+    return renderHosts().has(host);
   } catch { return false; }
 }

@@ -23,7 +23,10 @@ export const Route = createFileRoute("/api_/agent/sandbox_/profile")({
           const { fields, prefs } = splitProfilePatch(parsed.data);
           const revision = await patchSandboxProfile(ctx, fields, prefs);
           return agentOk({ revision });
-        } catch {
+        } catch (error) {
+          if ((error as Error)?.message === "draft_conflict") {
+            return agentError(409, "draft_conflict", "Another patch landed at the same time. GET the workspace, re-apply your change and send patches one at a time.");
+          }
           return agentError(400, "invalid_request", "The workspace is no longer editable (claimed or expired).");
         }
       },

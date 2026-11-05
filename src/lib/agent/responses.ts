@@ -10,6 +10,7 @@ export type AgentErrorCode =
   | "invalid_request"
   | "not_found"
   | "rate_limited"
+  | "draft_conflict"
   | "server_error";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };

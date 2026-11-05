@@ -505,7 +505,12 @@ function useDashboardLayout(userId: string | undefined) {
     return { ...prev, tiles: { ...prev.tiles, [id]: { ...cur, ...patch } } };
   });
   const reset = () => update(() => normalizeDashboardLayout({ hidden: [...OPTIONAL_DASHBOARD_WIDGETS] }));
-  return { ...board, toggle, moveTo, resize, reset, weatherCity: prefs.data?.weatherCity ?? null };
+  return {
+    ...board, toggle, moveTo, resize, reset,
+    weatherCity: prefs.data?.weatherCity ?? null,
+    weatherSource: prefs.data?.weatherCitySource ?? "none",
+    ownWeatherCity: prefs.data?.ownWeatherCity ?? null,
+  };
 }
 
 const TILE_WIDTH = { 1: "sm:col-span-1", 2: "sm:col-span-2", 3: "sm:col-span-2 xl:col-span-3" } as const;
@@ -622,7 +627,7 @@ function Slot({ id, editing, hidden, onToggle, order, tile, onMoveTo, onResize, 
   );
 }
 
-function WeatherLocationDialog({ open, current, onClose, userId }: { open: boolean; current: string | null; onClose: () => void; userId: string }) {
+function WeatherLocationDialog({ open, current, profileCity, onClose, userId }: { open: boolean; current: string | null; profileCity: string | null; onClose: () => void; userId: string }) {
   const save = useServerFn(saveCommandCenterPrefs);
   const qc = useQueryClient();
   const [city, setCity] = useState(current ?? "");
@@ -634,7 +639,7 @@ function WeatherLocationDialog({ open, current, onClose, userId }: { open: boole
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Locatie voor het weer</DialogTitle>
-          <DialogDescription>Je stelt dit één keer in; het wordt bewaard op je ROUT-profiel.</DialogDescription>
+          <DialogDescription>Standaard gebruikt het dashboard de stad van je profiel (locatie of weer-, klok- of kaartwidget). Vul hier enkel iets in als je dashboard een andere stad moet tonen.</DialogDescription>
         </DialogHeader>
         <form id="weather-loc" onSubmit={async (e) => {
           e.preventDefault();
@@ -649,9 +654,18 @@ function WeatherLocationDialog({ open, current, onClose, userId }: { open: boole
             toast.error("Locatie niet bewaard. Gebruik enkel letters, cijfers en leestekens.");
           } finally { setBusy(false); }
         }}>
-          <Input autoFocus aria-label="Stad" placeholder="Bijv. Gent" value={city} maxLength={80} onChange={(e) => setCity(e.target.value)} />
+          <Input autoFocus aria-label="Stad" placeholder={profileCity ? `Nu: ${profileCity} (van je profiel)` : "Bijv. Gent"} value={city} maxLength={80} onChange={(e) => setCity(e.target.value)} />
         </form>
         <DialogFooter>
+          {current ? <Button variant="outline" disabled={busy} onClick={async () => {
+            setBusy(true);
+            try {
+              await save({ data: { weatherCity: null } });
+              await qc.invalidateQueries({ queryKey: ["cc-prefs", userId] });
+              toast.success("Het dashboard volgt nu je profiellocatie.");
+              onClose();
+            } catch { toast.error("Niet bewaard. Probeer opnieuw."); } finally { setBusy(false); }
+          }}>Profiellocatie gebruiken</Button> : null}
           <Button variant="ghost" onClick={onClose}>Annuleren</Button>
           <Button type="submit" form="weather-loc" disabled={!valid || busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : null} Bewaren</Button>
         </DialogFooter>
@@ -809,7 +823,7 @@ export function CommandCenter() {
           <Slot id="connections" {...slot("connections")}><Widget to="/dashboard/identity" icon={Fingerprint} eyebrow="Gekoppelde apps" title={c?.connectedApps === null || c?.connectedApps === undefined ? "—" : plural(c.connectedApps, "app", "apps")} hint="Actieve toestemmingen voor je identiteit." /></Slot>
           <Slot id="visitors" {...slot("visitors")}><DashboardVisitors userId={user.id} /></Slot>
           <Slot id="spotify" {...slot("spotify")}><DashboardMusic userId={user.id} /></Slot>
-          <Slot id="weather" {...slot("weather")}><DashboardWeather city={layout.weatherCity} /></Slot>
+          <Slot id="weather" {...slot("weather")}><DashboardWeather city={layout.weatherCity} source={layout.weatherSource} /></Slot>
           {(["smarthome", "fitness", "smart"] as const).map(id => <Slot key={id} id={id} {...slot(id)}><UpcomingDashboardWidget title={WIDGET_LABEL[id]} /></Slot>)}
         </div>
 
@@ -820,7 +834,7 @@ export function CommandCenter() {
           Lokaal gesynchroniseerd {relative(new Date(state.savedAt).toISOString())}
         </p>
       ) : null}
-      <WeatherLocationDialog open={configuring === "weather"} current={layout.weatherCity} userId={user.id} onClose={() => setConfiguring(null)} />
+      <WeatherLocationDialog open={configuring === "weather"} current={layout.ownWeatherCity} profileCity={layout.weatherSource === "widget" || layout.weatherSource === "profile" ? layout.weatherCity : null} userId={user.id} onClose={() => setConfiguring(null)} />
     </AppLayout>
   );
 }

@@ -66,6 +66,11 @@ VPS/container host; put `/events` behind HTTPS with proxy buffering disabled.
   The sandbox's root-only environment cannot validate this hardened browser
   launch; run `CHROMIUM_PATH=... bun test render.test.ts` as a non-root worker
   user on the deployment host before enabling approved render hosts.
+  Entries are parsed strictly (`render-hosts.ts`): wildcards, schemes, ports,
+  paths, IP addresses and internal names are dropped and logged once. A tested
+  starting value for the platforms the Studio recognises:
+  `OMNI_RENDER_HOSTS=www.youtube.com,m.youtube.com,youtu.be,www.tiktok.com,www.instagram.com,x.com,twitter.com,bsky.app,open.spotify.com,music.apple.com,soundcloud.com,www.deezer.com,vimeo.com,www.twitch.tv`
+  — add a platform's script/API hosts only after `render.test.ts` passes on the host.
 - `omni_matrix_items` is an owner-only semantic draft projection; `grid_items`
   and `ingest_tokens` are compatibility views. Public cards still use published
   snapshots. UUID webhook tokens are stored only as SHA-256 hashes, not plaintext

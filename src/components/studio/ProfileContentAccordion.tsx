@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ProfileLinksManager } from "@/components/dashboard/editor/ProfileLinksManager";
 import { AddComponentModal } from "@/components/studio/AddComponentModal";
-import { scheduledBlocks, type ProfileBlock } from "@/lib/profile";
+import { scheduledBlocks, type ProfileBlock, type ProfileLinkMode } from "@/lib/profile";
 import { StudioSectionIcon } from "./StudioSectionIcon";
 import { ProfileImportCard } from "./ProfileImportCard";
 import { Switch } from "@/components/ui/switch";
@@ -24,6 +24,10 @@ interface Props {
   handle?: string;
   /** Import: take over name/subtitle from a restored export. */
   onImportMeta?: (meta: { displayName: string | null; tagline: string | null }) => void;
+  /** Profile-wide link display (default for each link's button/logo choice). */
+  linkMode?: ProfileLinkMode;
+  /** City from the profile location badge. */
+  profileCity?: string | null;
 }
 
 /**
@@ -43,6 +47,8 @@ export function ProfileContentAccordion({
   onAddKind,
   handle,
   onImportMeta,
+  linkMode,
+  profileCity,
 }: Props) {
   const { t } = useTranslation();
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -88,6 +94,8 @@ export function ProfileContentAccordion({
           openBlock={openBlock}
           onOpenBlockChange={onOpenBlockChange}
           onOpenAddDrawer={onOpenAddDrawer}
+          linkMode={linkMode}
+          profileCity={profileCity}
         />
         <ProfileImportCard blocks={blocks} onBlocksChange={onBlocksChange} onImportMeta={onImportMeta} />
         <details className="space-y-3 border-t border-border pt-4">
