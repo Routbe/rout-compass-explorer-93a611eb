@@ -122,4 +122,23 @@ export const enclave = {
   hash: {
     sha256Hex: (text: string) => callEnclave("hash.sha256Hex", { text }),
   },
+  protocol: {
+    identity: (userId: string) => callEnclave("protocol.identity", { userId }),
+    /** UI → worker plaintext (transferred), worker → UI a signed, ciphertext-only event. */
+    sealEvent: (userId: string, at: { stream: string; seq: number; prev: string | null; kind: string; capId?: string }, data: unknown): Promise<SignedEvent> => {
+      const plaintext = new TextEncoder().encode(JSON.stringify(data));
+      return callEnclave("protocol.sealEvent", { userId, ...at, plaintext }, moved(plaintext));
+    },
+    signEvent: (userId: string, draft: EventDraft) => callEnclave("protocol.signEvent", { userId, draft }),
+    openEvent: async <T = unknown>(userId: string, event: SignedEvent): Promise<T> => {
+      const { plaintext } = await callEnclave("protocol.openEvent", { userId, event });
+      try {
+        return JSON.parse(new TextDecoder().decode(plaintext)) as T;
+      } finally {
+        plaintext.fill(0);
+      }
+    },
+    dpop: async (userId: string, method: string, url: string) => (await callEnclave("protocol.dpop", { userId, method, url })).proof,
+    delegate: (userId: string, grant: CapabilityGrant, parent?: Capability | null) => callEnclave("protocol.delegate", { userId, grant, parent: parent ?? null }),
+  },
 };
