@@ -7,6 +7,8 @@ import { handleRuleMessage, type HandleRuleContext } from "./handle-rules";
 import type { PublicSocialLink } from "./social-verify";
 import { verifiedHandleError } from "./verified-handle";
 import { sanitizeHandleInput } from "@/lib/validations/sanitizeHandle";
+import { isVisualWidget } from "./profile-widgets";
+import { isProfileSectionKind } from "./profile-section-blocks";
 
 export interface ProfileBlock {
   id: string;
@@ -42,9 +44,47 @@ export interface ProfileBlock {
 }
 
 export type LinkDisplay = "button" | "icon" | "both";
-export function blockDisplay(b: Pick<ProfileBlock, "display">, profileMode: "rows" | "icons" | "both"): { button: boolean; icon: boolean } {
+export type ProfileLinkMode = "rows" | "icons" | "both";
+export function blockDisplay(b: Pick<ProfileBlock, "display">, profileMode: ProfileLinkMode): { button: boolean; icon: boolean } {
   const d = b.display ?? (profileMode === "rows" ? "button" : profileMode === "icons" ? "icon" : "both");
   return { button: d !== "icon", icon: d !== "button" };
+}
+
+/** The per-link choice the editor shows: the link's own choice or the profile-wide default. */
+export function effectiveLinkDisplay(b: Pick<ProfileBlock, "display">, profileMode: ProfileLinkMode): LinkDisplay {
+  const { button, icon } = blockDisplay(b, profileMode);
+  return button && icon ? "both" : icon ? "icon" : "button";
+}
+
+/** Profile-wide link display: the Design layers choice, else derived from the legacy button shape. */
+export function resolveLinkMode(linkDisplay: ProfileLinkMode | undefined, buttonShape: string | undefined): ProfileLinkMode {
+  return linkDisplay ?? (buttonShape === "icon" ? "icons" : buttonShape === "bar" ? "rows" : "both");
+}
+
+const NON_LINK_KINDS = new Set(["feedback", "live", "spacer", "text", "event_list", "newsletter", "booking_request", "faq_accordion", "map_embed", "vcard", "contact_form"]);
+
+/** Kinds that render as an ordinary outbound link (button or logo). */
+export function isPlainLinkKind(kind: string): boolean {
+  return !kind.startsWith("widget:") && !NON_LINK_KINDS.has(kind) && !isPromoBlock(kind) && !isWidgetBlock(kind) && !isProfileSectionKind(kind);
+}
+
+/** How many visible links currently show as a logo in the bar under the bio. */
+export function countLogoLinks(blocks: readonly ProfileBlock[], profileMode: ProfileLinkMode): number {
+  return blocks.filter((b) => !b.hidden && b.value.trim() !== "" && isPlainLinkKind(b.kind) && blockDisplay(b, profileMode).icon).length;
+}
+
+/** Logo bar guidance: a hint from the 4th logo, the wrap/scroll choice from the 6th. */
+export const LOGO_BAR_HINT_FROM = 4;
+export const LOGO_BAR_CHOICE_FROM = 6;
+export function logoBarStage(count: number): "calm" | "hint" | "choose" {
+  if (count >= LOGO_BAR_CHOICE_FROM) return "choose";
+  if (count >= LOGO_BAR_HINT_FROM) return "hint";
+  return "calm";
+}
+
+/** Wrap/scroll only applies once the bar holds more than 5 logos. */
+export function logoBarLayout(count: number, mode: "wrap" | "scroll" | undefined): "wrap" | "scroll" {
+  return count >= LOGO_BAR_CHOICE_FROM && mode === "scroll" ? "scroll" : "wrap";
 }
 
 export type BlockSize = "small" | "wide" | "large";
@@ -1412,7 +1452,8 @@ export const isWidgetBlock = (kind: string) =>
   kind === "vcard" ||
   kind === "map_embed" ||
   kind === "event_list" ||
-  kind === "countdown";
+  kind === "countdown" ||
+  isVisualWidget(kind);
 
 export const newBlockId = () =>
   `b_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
