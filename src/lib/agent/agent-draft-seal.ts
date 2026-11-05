@@ -39,6 +39,8 @@ function unb64u(s: string): Uint8Array {
 }
 
 const aad = (sid: string, what: string) => te.encode(`rout-agent:${what}:${sid}`);
+/** WebCrypto typings want ArrayBuffer-backed views; every view here is one. */
+const bs = (u: Uint8Array) => u as Uint8Array<ArrayBuffer>;
 
 async function kek(secret: string, purpose: SealPurpose, sid: string): Promise<CryptoKey> {
   const raw = te.encode(secret);
@@ -56,15 +58,15 @@ async function kek(secret: string, purpose: SealPurpose, sid: string): Promise<C
   }
 }
 
-const dkKey = (dk: Uint8Array) => crypto.subtle.importKey("raw", dk, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+const dkKey = (dk: Uint8Array) => crypto.subtle.importKey("raw", bs(dk), { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 
 async function encrypt(key: CryptoKey, plain: Uint8Array, ad: Uint8Array): Promise<Box> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: ad }, key, plain));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: bs(ad) }, key, bs(plain)));
   return { iv: b64u(iv), ct: b64u(ct) };
 }
 async function decrypt(key: CryptoKey, box: Box, ad: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64u(box.iv), additionalData: ad }, key, unb64u(box.ct)));
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bs(unb64u(box.iv)), additionalData: bs(ad) }, key, bs(unb64u(box.ct))));
 }
 
 export function isEnvelope(value: unknown): value is Envelope {
