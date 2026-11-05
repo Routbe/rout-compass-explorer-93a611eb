@@ -1645,6 +1645,24 @@ export interface PublicPromoCodesRow {
   "last_redeemed_at": string | Date | null;
 }
 
+export interface PublicProtocolDpopJtiRow {
+  "jkt": string;
+  "jti": string;
+  "expires_at": string | Date;
+}
+
+export interface PublicProtocolEventsRow {
+  "stream_id": string;
+  "seq": string;
+  "prev_hash": string | null;
+  "hash": string;
+  "author_did": string;
+  "kind": string;
+  "cap_id": string | null;
+  "event": JsonValue;
+  "received_at": string | Date;
+}
+
 export interface PublicPspCredentialsRow {
   "user_id": string;
   "provider": string;
@@ -2597,6 +2615,8 @@ export interface DbTables {
   "public.profiles": PublicProfilesRow;
   "public.promo_code_events": PublicPromoCodeEventsRow;
   "public.promo_codes": PublicPromoCodesRow;
+  "public.protocol_dpop_jti": PublicProtocolDpopJtiRow;
+  "public.protocol_events": PublicProtocolEventsRow;
   "public.psp_credentials": PublicPspCredentialsRow;
   "public.public_activity": PublicPublicActivityRow;
   "public.qa_guest_trust": PublicQaGuestTrustRow;

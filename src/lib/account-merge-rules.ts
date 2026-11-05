@@ -52,6 +52,8 @@ export const MERGE_TABLES: Readonly<Record<string, MergeTableRule>> = {
   omni_jobs: r("skip"),
   omni_matrix_items: r("skip"),
   social_grid_items: r("skip"),
+  // Wrapped E2EE data keys only open the secondary's own ciphertext: never moved or dropped.
+  e2ee_key_wraps: r("skip"),
   // Card/issuer records must not silently transfer ownership across accounts.
   card_designs: r("skip"),
   card_freezes: r("skip"),

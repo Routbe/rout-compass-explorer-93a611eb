@@ -17271,6 +17271,212 @@
     },
     {
       "schema": "public",
+      "name": "protocol_dpop_jti",
+      "columns": [
+        {
+          "name": "jkt",
+          "type": "text",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "jti",
+          "type": "text",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "protocol_dpop_jti_jkt_check",
+          "kind": "c",
+          "def": "CHECK ((jkt ~ '^[A-Za-z0-9_-]{43}$'::text))"
+        },
+        {
+          "name": "protocol_dpop_jti_jti_check",
+          "kind": "c",
+          "def": "CHECK (((length(jti) >= 16) AND (length(jti) <= 128)))"
+        },
+        {
+          "name": "protocol_dpop_jti_pkey",
+          "kind": "p",
+          "def": "PRIMARY KEY (jkt, jti)"
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX protocol_dpop_jti_expires_idx ON public.protocol_dpop_jti USING btree (expires_at)"
+      ],
+      "triggers": [],
+      "rls": true,
+      "forceRls": false,
+      "policies": [],
+      "grants": {}
+    },
+    {
+      "schema": "public",
+      "name": "protocol_events",
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "text",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "seq",
+          "type": "bigint",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "prev_hash",
+          "type": "text",
+          "notNull": false,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "hash",
+          "type": "text",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "author_did",
+          "type": "text",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "cap_id",
+          "type": "text",
+          "notNull": false,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "event",
+          "type": "jsonb",
+          "notNull": true,
+          "default": null,
+          "identity": null,
+          "generated": null
+        },
+        {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "notNull": true,
+          "default": "now()",
+          "identity": null,
+          "generated": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "protocol_events_author_did_check",
+          "kind": "c",
+          "def": "CHECK ((author_did ~ '^did:key:z[1-9A-HJ-NP-Za-km-z]{40,60}$'::text))"
+        },
+        {
+          "name": "protocol_events_cap_id_check",
+          "kind": "c",
+          "def": "CHECK ((cap_id ~ '^urn:rout:zcap:[A-Za-z0-9_-]{22}$'::text))"
+        },
+        {
+          "name": "protocol_events_check",
+          "kind": "c",
+          "def": "CHECK (((seq = 0) = (prev_hash IS NULL)))"
+        },
+        {
+          "name": "protocol_events_check1",
+          "kind": "c",
+          "def": "CHECK (((seq = 0) = (kind = 'stream.genesis'::text)))"
+        },
+        {
+          "name": "protocol_events_event_check",
+          "kind": "c",
+          "def": "CHECK ((octet_length((event)::text) <= 70000))"
+        },
+        {
+          "name": "protocol_events_hash_check",
+          "kind": "c",
+          "def": "CHECK ((hash ~ '^[0-9a-f]{64}$'::text))"
+        },
+        {
+          "name": "protocol_events_hash_key",
+          "kind": "u",
+          "def": "UNIQUE (hash)"
+        },
+        {
+          "name": "protocol_events_kind_check",
+          "kind": "c",
+          "def": "CHECK (((kind ~ '^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$'::text) AND (length(kind) <= 64)))"
+        },
+        {
+          "name": "protocol_events_pkey",
+          "kind": "p",
+          "def": "PRIMARY KEY (stream_id, seq)"
+        },
+        {
+          "name": "protocol_events_prev_hash_check",
+          "kind": "c",
+          "def": "CHECK ((prev_hash ~ '^[0-9a-f]{64}$'::text))"
+        },
+        {
+          "name": "protocol_events_seq_check",
+          "kind": "c",
+          "def": "CHECK ((seq >= 0))"
+        },
+        {
+          "name": "protocol_events_stream_id_check",
+          "kind": "c",
+          "def": "CHECK ((stream_id ~ '^urn:rout:stream:[A-Za-z0-9_-]{22}$'::text))"
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX protocol_events_revocations_idx ON public.protocol_events USING btree (stream_id, ((((event -> 'body'::text) -> 'public'::text) ->> 'capId'::text))) WHERE (kind = 'cap.revoke'::text)"
+      ],
+      "triggers": [
+        "CREATE TRIGGER protocol_events_no_truncate BEFORE TRUNCATE ON public.protocol_events FOR EACH STATEMENT EXECUTE FUNCTION rout_protocol_events_immutable()",
+        "CREATE TRIGGER protocol_events_no_update BEFORE DELETE OR UPDATE ON public.protocol_events FOR EACH ROW EXECUTE FUNCTION rout_protocol_events_immutable()"
+      ],
+      "rls": true,
+      "forceRls": false,
+      "policies": [],
+      "grants": {}
+    },
+    {
+      "schema": "public",
       "name": "psp_credentials",
       "columns": [
         {
@@ -26615,6 +26821,42 @@
       "name": "rout_profile_qa_level",
       "args": "p_handle text",
       "def": "CREATE OR REPLACE FUNCTION public.rout_profile_qa_level(p_handle text)\n RETURNS qa_permission_level\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select case when u.qa_permission_level <> 'public_unrestricted' then u.qa_permission_level\n              when u.date_of_birth > (current_date - interval '16 years') then 'verified_only'::public.qa_permission_level\n              else u.qa_permission_level end\n    from public.profiles p join public.users u on u.id = p.id\n   where lower(p.username) = lower(p_handle)\n   limit 1\n$function$"
+    },
+    {
+      "schema": "public",
+      "name": "rout_protocol_append",
+      "args": "p_stream text, p_seq bigint, p_prev text, p_hash text, p_author text, p_kind text, p_cap_id text, p_event jsonb",
+      "def": "CREATE OR REPLACE FUNCTION public.rout_protocol_append(p_stream text, p_seq bigint, p_prev text, p_hash text, p_author text, p_kind text, p_cap_id text, p_event jsonb)\n RETURNS text\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare head_hash text; inserted int;\nbegin\n  if p_seq > 0 then\n    select hash into head_hash from public.protocol_events where stream_id = p_stream and seq = p_seq - 1;\n    if head_hash is null then\n      if not exists (select 1 from public.protocol_events where stream_id = p_stream) then return 'unknown_stream'; end if;\n      return 'chain_broken';\n    end if;\n    if head_hash <> p_prev then return 'chain_broken'; end if;\n  end if;\n  insert into public.protocol_events (stream_id, seq, prev_hash, hash, author_did, kind, cap_id, event)\n  values (p_stream, p_seq, p_prev, p_hash, p_author, p_kind, p_cap_id, p_event)\n  on conflict do nothing;\n  get diagnostics inserted = row_count;\n  return case when inserted = 1 then 'ok' else 'conflict' end;\nend $function$"
+    },
+    {
+      "schema": "public",
+      "name": "rout_protocol_dpop_spend",
+      "args": "p_jkt text, p_jti text, p_expires_at timestamp with time zone",
+      "def": "CREATE OR REPLACE FUNCTION public.rout_protocol_dpop_spend(p_jkt text, p_jti text, p_expires_at timestamp with time zone)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare inserted int;\nbegin\n  delete from public.protocol_dpop_jti where expires_at < now() - interval '1 minute';\n  insert into public.protocol_dpop_jti (jkt, jti, expires_at)\n  values (p_jkt, p_jti, least(p_expires_at, now() + interval '5 minutes'))\n  on conflict do nothing;\n  get diagnostics inserted = row_count;\n  return inserted = 1;\nend $function$"
+    },
+    {
+      "schema": "public",
+      "name": "rout_protocol_events_immutable",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION public.rout_protocol_events_immutable()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nbegin\n  raise exception 'protocol_events is append-only' using errcode = '42501';\nend $function$"
+    },
+    {
+      "schema": "public",
+      "name": "rout_protocol_head",
+      "args": "p_stream text",
+      "def": "CREATE OR REPLACE FUNCTION public.rout_protocol_head(p_stream text)\n RETURNS TABLE(controller text, head_seq bigint, head_hash text)\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\n  select g.author_did, h.seq, h.hash\n  from public.protocol_events g\n  cross join lateral (\n    select seq, hash from public.protocol_events where stream_id = p_stream order by seq desc limit 1\n  ) h\n  where g.stream_id = p_stream and g.seq = 0\n$function$"
+    },
+    {
+      "schema": "public",
+      "name": "rout_protocol_read",
+      "args": "p_stream text, p_after bigint, p_limit integer",
+      "def": "CREATE OR REPLACE FUNCTION public.rout_protocol_read(p_stream text, p_after bigint, p_limit integer)\n RETURNS SETOF jsonb\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\n  select event from public.protocol_events\n  where stream_id = p_stream and seq > coalesce(p_after, -1)\n  order by seq\n  limit least(greatest(coalesce(p_limit, 100), 1), 200)\n$function$"
+    },
+    {
+      "schema": "public",
+      "name": "rout_protocol_revoked",
+      "args": "p_stream text, p_ids text[]",
+      "def": "CREATE OR REPLACE FUNCTION public.rout_protocol_revoked(p_stream text, p_ids text[])\n RETURNS SETOF text\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\n  select distinct e.event -> 'body' -> 'public' ->> 'capId'\n  from public.protocol_events e\n  join public.protocol_events g on g.stream_id = e.stream_id and g.seq = 0\n  where e.stream_id = p_stream and e.kind = 'cap.revoke' and e.author_did = g.author_did\n    and (e.event -> 'body' -> 'public' ->> 'capId') = any (p_ids)\n$function$"
     },
     {
       "schema": "public",
