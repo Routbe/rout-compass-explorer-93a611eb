@@ -46,6 +46,14 @@
 - [ ] Replace Better Auth by native WebAuthn + DPoP sessions (blocked: 28 of 29 accounts have no passkey yet)
 - [ ] Apply pending db/0204-0207 (owner decision: 0207 quarantines accounts without passkey)
 
+## Sign-in & 2FA (request 2026-11-05, 3rd)
+- [ ] Admin can sign in again (passkey, e-mail link or password)
+- [ ] Public + admin sign-in: passkey, e-mail link, password (+ reset/set password page)
+- [ ] Second step when 2FA is on: authenticator app, SMS, recovery code or passkey (also after an e-mail link)
+- [ ] 2FA optional for members, mandatory for admins (setup screen before the admin panel; admins cannot switch it off)
+- [ ] SMS as 2FA option for members with a verified phone number
+- [ ] Remove passkey-only quarantine; update tests, AGENTS.md
+
 ## Blockers
 - Google Wallet and Spotify keys are not configured here, so live tests against Google and Spotify cannot run.
 - No daily scheduler is committed (`vercel.json` absent); the owner must schedule `cleanup-assets`.
