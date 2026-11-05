@@ -121,7 +121,7 @@ describe("UI-thread isolation", () => {
   });
 
   it("UI code imports crypto modules for types only", () => {
-    const runtimeImport = /import\s+(?!type\b)[^;]*from\s+["']@\/lib\/(e2ee\/(crypto|recovery|device-key)|ledger\/crypto|vault\/ephemeral-vault|crypto-enclave\/enclave-core)["']/;
+    const runtimeImport = /import\s+(?!type\b)[^;]*from\s+["']@\/lib\/(e2ee\/(crypto|recovery|device-key)|ledger\/crypto|vault\/ephemeral-vault|crypto-enclave\/enclave-core|protocol\/identity-store)["']/;
     expect(ui.filter((f) => runtimeImport.test(readFileSync(f, "utf8")))).toEqual([]);
   });
 

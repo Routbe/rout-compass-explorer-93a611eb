@@ -5,7 +5,7 @@
  */
 import { enclave } from "@/lib/crypto-enclave/client";
 import type { Capability } from "./capabilities";
-import type { SignedEvent } from "./events";
+import { verifyChain, type SignedEvent } from "./events";
 
 type Head = { seq: number; hash: string };
 type ReadResult = { head: Head; events: SignedEvent[] };
@@ -77,15 +77,21 @@ export const ledger = {
 
   /** Decrypts every sealed event of a stream inside the enclave and returns `{ seq, kind, data }`. */
   async replay<T = unknown>(userId: string, stream: string): Promise<Array<{ seq: number; kind: string; author: string; data: T | null }>> {
-    const out: Array<{ seq: number; kind: string; author: string; data: T | null }> = [];
+    const all: SignedEvent[] = [];
     let after = -1;
     for (;;) {
       const { events, head } = await ledger.read(userId, stream, after);
-      for (const e of events) {
-        out.push({ seq: e.seq, kind: e.kind, author: e.author, data: e.body.sealed ? await enclave.protocol.openEvent<T>(userId, e) : null });
-      }
-      if (!events.length || events[events.length - 1].seq >= head.seq) return out;
+      all.push(...events);
+      if (!events.length || events[events.length - 1].seq >= head.seq) break;
       after = events[events.length - 1].seq;
     }
+    // Never trust the server's copy: every hash, signature and link is re-checked here.
+    const check = verifyChain(all);
+    if (!check.ok) throw new LedgerError(check.error, 0);
+    const out: Array<{ seq: number; kind: string; author: string; data: T | null }> = [];
+    for (const e of all) {
+      out.push({ seq: e.seq, kind: e.kind, author: e.author, data: e.body.sealed ? await enclave.protocol.openEvent<T>(userId, e) : null });
+    }
+    return out;
   },
 };
