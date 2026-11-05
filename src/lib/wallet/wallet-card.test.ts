@@ -37,7 +37,7 @@ describe("ROUT Card wallet payload", () => {
     expect(o.hexBackgroundColor).toBe(harmonizeProfileBackground(root.hexBackgroundColor, root.accentHex));
     expect(o.barcode).toMatchObject({ type: "QR_CODE", value: "https://rout.be/@jona" });
     expect(o.heroImage.sourceUri.uri).toMatch(/^https:\/\/rout\.be\/api\/wallet\/render\/jona\/[a-z0-9]+\/hero\.png$/);
-    expect(o.logo.sourceUri.uri).toBe("https://rout.be/api/wallet/render/logo/04180e/light.png");
+    expect(o.logo.sourceUri.uri).toBe(`https://rout.be/api/wallet/render/logo/${o.hexBackgroundColor.slice(1)}/light.png`);
     expect(o.imageModulesData.map((m) => m.mainImage.sourceUri.uri)).toEqual([
       o.heroImage.sourceUri.uri.replace("hero.png", "strip.png"),
     ]);
