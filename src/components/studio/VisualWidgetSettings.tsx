@@ -164,8 +164,8 @@ function PlacePicker({ place, sharedPlace, profileCity, onPick }: { place: Widge
             <Check className="h-3.5 w-3.5" aria-hidden /> {t("studio.vw.useShared", { city: sharedPlace.name })}
           </Button>
         )}
-        {profileCity && profileCity !== place?.name && (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void run(profileCity, true)}>
+        {profileCity && profileCity.split(",")[0]!.trim() !== place?.name && (
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void run(profileCity.split(",")[0]!.trim(), true)}>
             <MapPin className="h-3.5 w-3.5" aria-hidden /> {t("studio.vw.useProfileCity", { city: profileCity })}
           </Button>
         )}
