@@ -73,7 +73,7 @@ describe("second sign-in step after an e-mail link", () => {
     await call(auth, "/sign-in/magic-link", jar, { email: "lid@example.com", callbackURL: "/dashboard" });
     const res = await call(auth, lastLink, jar);
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/dashboard");
+    expect(res.headers.get("location")).toBe(`${BASE}/dashboard`);
     expect(hasSession(jar)).toBe(true);
   });
 
