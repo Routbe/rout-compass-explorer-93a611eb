@@ -95,17 +95,28 @@ export async function deleteAsset(userId: string, id: string) {
 }
 
 export async function purgeExpiredAssets() {
-  const rows = (await sql`select id, s3_key, bucket_kind from public.user_assets
-    where is_lifetime = false and expires_at < now() limit 500`) as Row[];
-  let deletedCount = 0;
-  for (const r of rows) {
-    try {
-      await deleteObject(String(r["bucket_kind"]) as BucketKind, String(r["s3_key"]));
-      await sql`delete from public.user_assets where id = ${String(r["id"])}`;
-      deletedCount += 1;
-    } catch (error) {
-      console.warn("[assets] purge failed", r["id"], error);
-    }
-  }
-  return { deletedCount };
+  const { drainExpired } = await import("./storage/expiry-drain");
+  const out = await drainExpired({
+    batchSize: 500,
+    fetchBatch: async (cursor, n) => {
+      const rows = (cursor
+        ? await sql`select id, s3_key, bucket_kind, to_json(expires_at) as exp from public.user_assets
+            where is_lifetime = false and expires_at < now() and (expires_at, id::text) > (${cursor.expiresAt}::timestamptz, ${cursor.id})
+            order by expires_at, id::text limit ${n}`
+        : await sql`select id, s3_key, bucket_kind, to_json(expires_at) as exp from public.user_assets
+            where is_lifetime = false and expires_at < now() order by expires_at, id::text limit ${n}`) as Row[];
+      return rows.map((r) => ({ id: String(r["id"]), expiresAt: String(r["exp"]), key: String(r["s3_key"]), kind: String(r["bucket_kind"]) as BucketKind }));
+    },
+    // Storage first: a failed delete keeps the row, so the object is retried next run.
+    remove: async (r) => {
+      try {
+        await deleteObject(r.kind, r.key);
+      } catch (error) {
+        console.warn("[assets] purge failed", r.id, error);
+        throw error;
+      }
+      await sql`delete from public.user_assets where id = ${r.id}`;
+    },
+  });
+  return { deletedCount: out.removed, failed: out.failed, more: out.more };
 }

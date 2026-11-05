@@ -61,19 +61,23 @@ export async function resolveSharedFile(id: string): Promise<{ url: string } | {
 }
 
 /** Removes expired files from Scaleway first, then from the table. */
-export async function purgeExpiredSharedFiles(limit = 200): Promise<{ removed: number; failed: number }> {
-  const rows = (await sql`select id, bucket_key from public.shared_files
-    where expires_at <= now() order by expires_at limit ${limit}`) as Row[];
-  let removed = 0;
-  let failed = 0;
-  for (const row of rows) {
-    try {
-      await deleteObject("client", String(row["bucket_key"]));
-      await sql`delete from public.shared_files where id = ${String(row["id"])}`;
-      removed++;
-    } catch {
-      failed++;
-    }
-  }
-  return { removed, failed };
+export async function purgeExpiredSharedFiles(limit = 200): Promise<{ removed: number; failed: number; more: boolean }> {
+  const { drainExpired } = await import("./expiry-drain");
+  return drainExpired({
+    batchSize: limit,
+    fetchBatch: async (cursor, n) => {
+      const rows = (cursor
+        ? await sql`select id, bucket_key, to_json(expires_at) as exp from public.shared_files
+            where expires_at <= now() and (expires_at, id::text) > (${cursor.expiresAt}::timestamptz, ${cursor.id})
+            order by expires_at, id::text limit ${n}`
+        : await sql`select id, bucket_key, to_json(expires_at) as exp from public.shared_files
+            where expires_at <= now() order by expires_at, id::text limit ${n}`) as Row[];
+      return rows.map((r) => ({ id: String(r["id"]), expiresAt: String(r["exp"]), key: String(r["bucket_key"]) }));
+    },
+    // Storage first: if it fails the row stays, so the object is never orphaned.
+    remove: async (r) => {
+      await deleteObject("client", r.key);
+      await sql`delete from public.shared_files where id = ${r.id}`;
+    },
+  });
 }
