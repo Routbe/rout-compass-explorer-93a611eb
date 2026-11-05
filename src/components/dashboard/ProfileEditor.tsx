@@ -105,9 +105,12 @@ import {
   isReservedHandle,
   newBlockId,
   normalizeHandle,
+  resolveLinkMode,
   type ProfileBlock,
   type ProfileRecord,
 } from "@/lib/profile";
+import { normalizeDesignLayers } from "@/lib/design-layers";
+import { cityFromBadge } from "@/lib/ambient-weather";
 import { ConversionCoachFab } from "@/components/studio/ConversionCoachFab";
 import { ShareInspector } from "@/components/studio/ShareInspector";
 import { RoutCardLauncher } from "@/components/wallet/RoutCardLauncher";
