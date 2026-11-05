@@ -46,7 +46,7 @@ function ClaimWorkspacePage() {
   const startLogin = useServerFn(beginAuthIntent);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ slug: string } | null>(null);
+  const [done, setDone] = useState<{ slug: string; restored: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const state = !valid ? "invalid" : done ? "done" : q.data === null ? "invalid" : q.data ? claimState(q.data) : null;
@@ -67,7 +67,7 @@ function ClaimWorkspacePage() {
     setError(null);
     try {
       const result = await claim({ data: { token } });
-      setDone({ slug: result.slug });
+      setDone({ slug: result.slug, restored: result.draftRestored !== false });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       setError(message.includes("claim_used") ? "claimed" : message.includes("claim_expired") ? "expired" : "error");
@@ -90,6 +90,11 @@ function ClaimWorkspacePage() {
             <p className="text-muted-foreground">
               Je bent nu eigenaar. De AI-agent blijft zichtbaar als Connected App — je kunt zijn toegang altijd intrekken.
             </p>
+            {done.restored ? (
+              <p className="text-xs text-muted-foreground">Het ontwerp van de agent was versleuteld bewaard en is nu met jouw link geopend.</p>
+            ) : (
+              <p role="alert" className="text-xs text-destructive">Het ontwerp kon nog niet geopend worden. Open deze link straks opnieuw en klik nogmaals op claimen om het af te ronden.</p>
+            )}
             <Button asChild>
               <Link to="/w/$slug" params={{ slug: done.slug }}>Open je workspace</Link>
             </Button>
