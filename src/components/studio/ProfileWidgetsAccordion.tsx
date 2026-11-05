@@ -200,9 +200,9 @@ export function ProfileWidgetsAccordion({
                             onSize={(size) => patchBlock(b.id, { size })}
                             sharedPlace={sharedPlace}
                             profileCity={profileCity ?? null}
-                            onPlace={(place) => onBlocksChange((list) => applySharedPlace(list, b.id, place))}
+                            onPlace={(place) => onBlocksChange?.((list) => applySharedPlace(list, b.id, place))}
                           />
-                          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => { onBlocksChange((list) => list.filter((x) => x.id !== b.id)); setOpenWidget(null); }}>
+                          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => { onBlocksChange?.((list) => list.filter((x) => x.id !== b.id)); setOpenWidget(null); }}>
                             <Trash2 className="h-3.5 w-3.5" aria-hidden /> {t("studio.links.delete")}
                           </Button>
                         </div>
