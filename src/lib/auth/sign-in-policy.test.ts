@@ -1,26 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { passkeyOnlyDecision } from "./passkey-only";
+import { adminAccessDecision, secondFactorMethods, signInPathDecision, smsSecondFactorAvailable } from "./sign-in-policy";
 import { signSignupTicket, verifySignupTicket, SIGNUP_TICKET_TTL_S } from "./signup-ticket";
 
-describe("passkey-only gateway policy", () => {
+describe("sign-in gateway policy", () => {
   it.each([
     "/sign-in/email",
     "/sign-in/magic-link",
-    "/sign-in/social",
-    "/sign-in/oauth2",
-    "/sign-up/email",
     "/magic-link/verify",
-    "/forget-password",
     "/request-password-reset",
     "/reset-password",
+    "/reset-password/abc123",
     "/change-password",
-    "/set-password",
-    "/something-new",
-  ])("refuses %s", (path) => {
-    expect(passkeyOnlyDecision(path)).toEqual({ allow: false, code: "method_disabled" });
-  });
-
-  it.each([
+    "/two-factor/verify-totp",
+    "/two-factor/send-otp",
+    "/two-factor/verify-otp",
+    "/two-factor/verify-backup-code",
+    "/two-factor/options",
     "/passkey/generate-authenticate-options",
     "/passkey/verify-authentication",
     "/passkey/generate-register-options",
@@ -30,7 +25,40 @@ describe("passkey-only gateway policy", () => {
     "/link-social",
     "/callback/google",
   ])("allows %s", (path) => {
-    expect(passkeyOnlyDecision(path)).toEqual({ allow: true });
+    expect(signInPathDecision(path)).toEqual({ allow: true });
+  });
+
+  it.each([
+    // New accounts only via the passkey sign-up ticket; social only links.
+    "/sign-up/email",
+    "/sign-in/social",
+    "/sign-in/oauth2",
+    "/forget-password",
+    "/set-password",
+    "/verify-email",
+    "/something-new",
+  ])("refuses %s", (path) => {
+    expect(signInPathDecision(path)).toEqual({ allow: false, code: "method_disabled" });
+  });
+});
+
+describe("second sign-in step", () => {
+  it("offers passkey, app, SMS and recovery code — never e-mail", () => {
+    expect(secondFactorMethods({ totp: true, smsTo: "•••• 12", passkey: true, backupCodes: true })).toEqual(["passkey", "totp", "sms", "backup"]);
+    expect(secondFactorMethods({ totp: false, smsTo: null, passkey: false, backupCodes: false })).toEqual([]);
+  });
+  it("sends SMS only to a verified number with a configured provider", () => {
+    expect(smsSecondFactorAvailable(true, true)).toBe(true);
+    expect(smsSecondFactorAvailable(false, true)).toBe(false);
+    expect(smsSecondFactorAvailable(true, false)).toBe(false);
+  });
+});
+
+describe("admin access", () => {
+  it("requires 2FA to be switched on for admins", () => {
+    expect(adminAccessDecision(true, true)).toBe("allow");
+    expect(adminAccessDecision(true, false)).toBe("two_factor_setup_required");
+    expect(adminAccessDecision(false, true)).toBe("forbidden");
   });
 });
 
