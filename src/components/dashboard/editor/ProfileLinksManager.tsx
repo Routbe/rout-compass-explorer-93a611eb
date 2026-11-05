@@ -41,8 +41,16 @@ import {
   BLOCK_SIZES,
   isArchivedBlock,
   restoreArchivedBlock,
+  effectiveLinkDisplay,
+  isPlainLinkKind,
+  countLogoLinks,
+  logoBarStage,
+  type LinkDisplay,
+  type ProfileLinkMode,
   type ProfileBlock,
 } from "@/lib/profile";
+import { applySharedPlace, isVisualWidget, sharedWidgetPlace, type VisualWidgetKind } from "@/lib/profile-widgets";
+import { VisualWidgetSettings } from "@/components/studio/VisualWidgetSettings";
 import { isProfileSectionKind } from "@/lib/profile-section-blocks";
 import { BlockRulesPopover } from "@/components/studio/BlockRulesPopover";
 import { BookingBlockSettings } from "@/components/dashboard/BookingBlockSettings";
@@ -67,6 +75,10 @@ interface ProfileLinksManagerProps {
   openBlock: string | null;
   onOpenBlockChange: (id: string | null) => void;
   onOpenAddDrawer: () => void;
+  /** Profile-wide link display, the default for links without their own choice. */
+  linkMode?: ProfileLinkMode;
+  /** City from the profile location badge, offered to location widgets. */
+  profileCity?: string | null;
 }
 
 /**
@@ -79,6 +91,8 @@ export function ProfileLinksManager({
   openBlock,
   onOpenBlockChange,
   onOpenAddDrawer,
+  linkMode = "rows",
+  profileCity = null,
 }: ProfileLinksManagerProps) {
   const { t } = useI18n();
   const dragId = useRef<string | null>(null);
@@ -89,6 +103,8 @@ export function ProfileLinksManager({
   const now = Date.now();
   const archivedCount = blocks.filter((b) => isArchivedBlock(b, now)).length;
   const shown = blocks.filter((b) => isArchivedBlock(b, now) === (view === "archive"));
+  const logoCount = countLogoLinks(blocks, linkMode);
+  const logoStage = logoBarStage(logoCount);
 
   const patch = (id: string, next: Partial<ProfileBlock>) =>
     onBlocksChange((b) => b.map((x) => (x.id === id ? { ...x, ...next } : x)));
@@ -202,6 +218,12 @@ export function ProfileLinksManager({
         ))}
       </div>
 
+      {view === "active" && logoStage !== "calm" && (
+        <p role="status" className="rounded-xl border border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+          {logoStage === "hint" ? t("studio.logoBar.hint", { count: logoCount }) : t("studio.logoBar.choose", { count: logoCount })}
+        </p>
+      )}
+
       {shown.length === 0 && (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
           {view === "archive" ? t("studio.links.archiveEmpty") : t("studio.links.empty")}
@@ -309,7 +331,18 @@ export function ProfileLinksManager({
 
               {open && (
                 <div className="mt-3 space-y-2 border-t border-border pt-3">
-                  {section ? (
+                  {isVisualWidget(b.kind) ? (
+                    <VisualWidgetSettings
+                      kind={b.kind as VisualWidgetKind}
+                      label={b.label}
+                      value={b.value}
+                      onChange={(value) => patch(b.id, { value })}
+                      onTitle={(label) => patch(b.id, { label })}
+                      sharedPlace={sharedWidgetPlace(blocks)}
+                      profileCity={profileCity}
+                      onPlace={(place) => onBlocksChange((list) => applySharedPlace(list, b.id, place))}
+                    />
+                  ) : section ? (
                     <>
                       <Input aria-label={t("studio.links.label")} value={b.label} maxLength={100} onChange={(e) => patch(b.id, { label: e.target.value })} />
                       {b.kind === "widget:youtube" && <YouTubeStudioCard />}
@@ -593,6 +626,32 @@ export function ProfileLinksManager({
                     </div>
                     <p className="text-[10px] text-muted-foreground">{t("studio.links.tileHelp")}</p>
                   </div>
+                  {isPlainLinkKind(b.kind) && (
+                    <div className="space-y-1.5 rounded-xl border border-border/60 bg-background p-3">
+                      <p className="text-[11px] font-medium text-foreground">{t("studio.logoBar.tileType")}</p>
+                      <div role="radiogroup" aria-label={t("studio.logoBar.tileType")} className="flex flex-wrap gap-1.5">
+                        {(["button", "icon", "both"] as const satisfies readonly LinkDisplay[]).map((d) => {
+                          const active = effectiveLinkDisplay(b, linkMode) === d;
+                          return (
+                            <button
+                              key={d}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              onClick={() => patch(b.id, { display: d })}
+                              className={cn(
+                                "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                                active ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:bg-muted",
+                              )}
+                            >
+                              {t(`studio.logoBar.display.${d}`)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">{b.display ? t("studio.logoBar.own") : t("studio.logoBar.followsProfile")}</p>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
