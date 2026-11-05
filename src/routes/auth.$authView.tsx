@@ -5,8 +5,9 @@ import AuthNeon from "@/components/imported-pages/AuthNeon";
 import { isAdminMode } from "@/lib/app-mode";
 
 /**
- * Passkey-only: `/auth/sign-in` (passkey), `/auth/sign-up` (account + passkey in
- * één stap) en `/auth/recovery` (herstel voor accounts zonder passkey).
+ * `/auth/sign-in` (passkey, e-maillink of wachtwoord + tweede stap),
+ * `/auth/sign-up` (account + passkey in één stap), `/auth/reset-password`
+ * (wachtwoord instellen of herstellen) en `/auth/recovery` (handmatig herstel).
  */
 export const Route = createFileRoute("/auth/$authView")({
   head: () => ({
@@ -32,6 +33,7 @@ function AuthPage() {
   const { authView } = Route.useParams();
   if (authView === "sign-in") return <AuthNeon initialMode="signin" />;
   if (authView === "recovery") return <AuthNeon initialMode="recovery" />;
+  if (authView === "reset-password") return <AuthNeon initialMode="reset" />;
   if (authView === "sign-up") return <AuthNeon initialMode="signup" />;
   throw notFound();
 }

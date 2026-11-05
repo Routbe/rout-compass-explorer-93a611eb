@@ -21,6 +21,16 @@ export async function assertAdminRole(userId: string) {
   const { isPublicMode } = await import("./app-mode");
   if (isPublicMode()) throw new Error("Forbidden");
   if (!(await hasRole(userId, "admin"))) throw new Error("Forbidden");
+  await assertAdminTwoFactor(userId);
+}
+
+/** Admin surfaces answer only once the admin has 2FA switched on. */
+async function assertAdminTwoFactor(userId: string) {
+  const { memberTwoFactorEnabled } = await import("./auth/second-factor.server");
+  const { adminAccessDecision, ADMIN_TWO_FACTOR_REQUIRED } = await import("./auth/sign-in-policy");
+  if (adminAccessDecision(true, await memberTwoFactorEnabled(userId)) !== "allow") {
+    throw Object.assign(new Error(ADMIN_TWO_FACTOR_REQUIRED), { statusCode: 403 });
+  }
 }
 
 /** Roles allowed into the VIP short-handle console. */
@@ -44,6 +54,7 @@ export async function assertVipConsoleRole(userId: string): Promise<VipConsoleRo
   if (isPublicMode()) throw new Error("Forbidden");
   const role = await resolveVipConsoleRole(userId);
   if (!role) throw new Error("Forbidden");
+  if (role === "admin") await assertAdminTwoFactor(userId);
   return role;
 }
 

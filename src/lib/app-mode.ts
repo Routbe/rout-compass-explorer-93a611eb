@@ -31,7 +31,7 @@ export function isAdminPath(pathname: string): boolean {
 export function isAdminPortalPath(pathname: string): boolean {
   return (
     isAdminPath(pathname) ||
-    /^\/auth(?:\/(?:sign-in|continue))?\/?$/.test(pathname) ||
+    /^\/auth(?:\/(?:sign-in|continue|reset-password))?\/?$/.test(pathname) ||
     /^\/api_?\/auth(?:\/|$)/.test(pathname) ||
     /^\/(?:_serverFn|assets|@(vite|fs|id|react-refresh)|src|node_modules|__)(?:\/|$)/.test(pathname) ||
     /^\/api\/public\/(?:altcha|auth\/providers|session\/logout|health|avatar|proxy-image)(?:\/|$)/.test(pathname) ||

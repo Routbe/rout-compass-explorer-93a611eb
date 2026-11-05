@@ -50,7 +50,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("auth handler with missing OAuth credentials (passkey-only)", () => {
+describe("auth handler with missing OAuth credentials", () => {
   it("reports a missing account database before any passkey ceremony", async () => {
     clearEnv();
     const res = await call(post("/api/auth/passkey/generate-authenticate-options", {}));

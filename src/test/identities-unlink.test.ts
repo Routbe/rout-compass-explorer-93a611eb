@@ -19,7 +19,7 @@ vi.mock("@/lib/neon", () => ({
 const { unlinkIdentity } = await import("@/lib/identities.server");
 
 describe("unlinkIdentity", () => {
-  it("allows removing the last linked identity: sign-in is passkey-only", async () => {
+  it("allows removing the last linked identity: identities never sign in", async () => {
     state.fedi = [{ id: "f1", provider: "bluesky", provider_account_id: "did:x", created_at: "" }];
     expect(await unlinkIdentity("u1", "f1")).toEqual({ ok: true });
   });

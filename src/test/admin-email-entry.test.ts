@@ -21,14 +21,22 @@ afterEach(() => vi.unstubAllEnvs());
 function request(path: string, email: unknown) {
   return handleAuthRequest({ request: new Request(`http://localhost/api/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) }) });
 }
-describe("passkey-only auth gateway", () => {
+describe("sign-in gateway", () => {
   for (const mode of ["admin", "public"]) {
-    for (const path of ["/sign-in/email", "/sign-in/magic-link", "/sign-up/email", "/forget-password", "/request-password-reset", "/sign-in/social"]) {
+    for (const path of ["/sign-up/email", "/forget-password", "/sign-in/social"]) {
       it(`refuses ${path} in ${mode} mode with method_disabled`, async () => {
         vi.stubEnv("APP_MODE", mode);
         const res = await request(path, "owner@example.com");
         expect(res.status).toBe(410);
         expect((await res.json()).code).toBe("method_disabled");
+      });
+    }
+    for (const path of ["/sign-in/email", "/sign-in/magic-link", "/request-password-reset"]) {
+      it(`lets ${path} through in ${mode} mode`, async () => {
+        vi.stubEnv("APP_MODE", mode);
+        const res = await request(path, "owner@example.com");
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ reachedAuth: true });
       });
     }
   }

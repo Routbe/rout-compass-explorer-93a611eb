@@ -5,7 +5,7 @@
  *
  * Format: `su.<b64url(json)>.<b64url(hmac)>`, valid 10 minutes.
  */
-import { SIGNUP_CONTEXT_PREFIX } from "./passkey-only";
+import { SIGNUP_CONTEXT_PREFIX } from "./sign-in-policy";
 
 const enc = new TextEncoder();
 export const SIGNUP_TICKET_TTL_S = 10 * 60;

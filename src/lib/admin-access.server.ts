@@ -72,24 +72,31 @@ export async function assertAdminPermission(userId: string, permission: AdminPer
   if (!(await hasAdminPermission(userId, permission))) {
     throw Object.assign(new Error("forbidden"), { statusCode: 403 });
   }
+  // Every admin surface requires 2FA switched on.
+  const { memberTwoFactorEnabled } = await import("./auth/second-factor.server");
+  const { ADMIN_TWO_FACTOR_REQUIRED } = await import("./auth/sign-in-policy");
+  if (!(await memberTwoFactorEnabled(userId))) throw Object.assign(new Error(ADMIN_TWO_FACTOR_REQUIRED), { statusCode: 403 });
 }
 
 /** Permissions of the signed-in user, for gating the admin UI. */
 export async function myAdminAccess(userId: string) {
+  const { memberTwoFactorEnabled } = await import("./auth/second-factor.server");
+  const twoFactorEnabled = await memberTwoFactorEnabled(userId).catch(() => false);
   const fullAdmin = await isFullAdmin(userId);
-  if (fullAdmin) return { fullAdmin, permissions: [...ADMIN_PERMISSIONS] as AdminPermission[] };
+  if (fullAdmin) return { fullAdmin, twoFactorEnabled, permissions: [...ADMIN_PERMISSIONS] as AdminPermission[] };
   try {
     const rows = (await sql`
       select permission from public.admin_permissions where user_id = ${userId}
     `) as Row[];
     return {
       fullAdmin,
+      twoFactorEnabled,
       permissions: rows
         .map((r) => String(r["permission"]))
         .filter(isAdminPermission) as AdminPermission[],
     };
   } catch {
-    return { fullAdmin, permissions: [] as AdminPermission[] };
+    return { fullAdmin, twoFactorEnabled, permissions: [] as AdminPermission[] };
   }
 }
 

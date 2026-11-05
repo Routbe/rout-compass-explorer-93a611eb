@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@/lib/router-compat";
 import { toast } from "sonner";
-import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Loader2, MailCheck, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Loader2, Lock, Mail, MailCheck, ShieldCheck } from "lucide-react";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -23,11 +23,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SIGNUP_CONSENT_VERSION, canSubmitSignUp } from "@/lib/signup-consent";
 import { isMinorDob, signupAgeProblem } from "@/lib/minor-safety";
+import { redeemLoginCodeFn } from "@/lib/login-code.functions";
+import { SecondFactorStep } from "@/components/auth/SecondFactorStep";
 
 /** Deliberately permissive: catches typos, never rejects a valid address. */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Mode = "signin" | "signup" | "recovery";
+type Mode = "signin" | "signup" | "recovery" | "reset";
+/** Steps inside the sign-in card. */
+type SignInStep = "choose" | "password" | "link-sent" | "second" | "reset-request" | "reset-sent";
+const MIN_PASSWORD = 12;
 type ApiResult = { data?: Record<string, unknown>; error?: { code?: string; message?: string } };
 
 function errorMessage(error: unknown, fallback: string) {
@@ -59,9 +64,10 @@ async function enrollPasskey(context: string, name: string) {
 }
 
 /**
- * ROUT sign-in card, PASSKEY-ONLY (WebAuthn/FIDO2): no passwords, no e-mail
- * links, no social sign-in. Sign-up creates the account together with its first
- * passkey; accounts without a passkey recover through an admin-verified link.
+ * ROUT sign-in card. First step: passkey (WebAuthn/FIDO2), one-time e-mail link
+ * (with a 6-digit code for another device) or e-mail + password. Members with
+ * 2FA on finish with a second step (passkey, authenticator app, SMS or recovery
+ * code). Sign-up creates the account together with its first passkey.
  */
 export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mode }) {
   const { t } = useTranslation();
@@ -75,8 +81,11 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
-  const [needTotp, setNeedTotp] = useState(false);
-  const [totp, setTotp] = useState("");
+  const [step, setStep] = useState<SignInStep>("choose");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [mailCode, setMailCode] = useState("");
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [recoveryFiled, setRecoveryFiled] = useState(false);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [consented, setConsented] = useState(false);
@@ -108,16 +117,24 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
     const code = params.get("error");
     const redirect = params.get("redirect") ?? params.get("next");
     const token = params.get("token");
-    if (token && /^[0-9a-f]{64}$/.test(token)) {
+    if (initialMode === "reset") {
+      if (token && /^[A-Za-z0-9_-]{8,128}$/.test(token)) setResetToken(token);
+      else if (code) toast.error(t("auth.mf.resetInvalid"));
+    } else if (token && /^[0-9a-f]{64}$/.test(token)) {
       setRecoveryToken(token);
       setMode("recovery");
     }
-    if (code) {
+    if (params.get("second_factor") === "1") {
+      setMode("signin");
+      setStep("second");
+    }
+    if (code && initialMode !== "reset") {
       const known = (AUTH_ERROR_CODES as readonly string[]).includes(code) ? code : "provider_rejected";
-      toast.error(known === "method_disabled" ? t("auth.pk.methodDisabled") : t("auth.pk.failed"));
+      toast.error(known === "method_disabled" ? t("auth.pk.methodDisabled") : known === "link_expired" ? t("auth.mf.linkExpired") : t("auth.pk.failed"));
     }
     if (redirect) void beginAuthIntent({ data: { next: redirect } }).catch(() => null);
     if (params.toString()) window.history.replaceState({}, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
   const onEmailChange = (value: string) => {
@@ -141,11 +158,6 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
         toast.error(res.error.message || t("auth.passkey.failed"));
         return;
       }
-      if ((res as { data?: { twoFactorRedirect?: boolean } } | undefined)?.data?.twoFactorRedirect) {
-        setTotp("");
-        setNeedTotp(true);
-        return;
-      }
       toast.success(t("auth.ui.toast.welcome"));
       await refresh();
     } catch (err) {
@@ -157,7 +169,7 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
 
   // WebAuthn Conditional UI: saved passkeys appear in the browser's autofill.
   useEffect(() => {
-    if (!readiness?.ready || mode !== "signin") return;
+    if (!readiness?.ready || mode !== "signin" || step === "second") return;
     let cancelled = false;
     const pkc = typeof window !== "undefined" ? window.PublicKeyCredential : undefined;
     if (!pkc?.isConditionalMediationAvailable) return;
@@ -176,20 +188,125 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readiness?.ready, mode]);
+  }, [readiness?.ready, mode, step === "second"]);
 
-  const verifyTotp = async (e: React.FormEvent) => {
+  const failMessage = (error: { code?: string; message?: string; status?: number } | undefined, fallback: string) => {
+    if (!error) return fallback;
+    if (error.status === 429 || error.code === "rate_limited") return t("auth.ui.code.tooMany");
+    if (error.code === "INVALID_EMAIL_OR_PASSWORD") return t("auth.mf.wrongPassword");
+    return error.message || fallback;
+  };
+
+  /** One-time e-mail link (+ 6-digit code for another device). */
+  const sendLink = async () => {
+    if (unavailable) { toast.error(AUTH_UNAVAILABLE_TEXT[locale]); return; }
+    if (!emailAccepted()) return;
+    setLoading(true);
+    const address = email.trim().toLowerCase();
+    try {
+      const result = await withAltcha(address, (proof) =>
+        authClient.signIn.magicLink({ email: address, callbackURL: POST_AUTH_PATH, errorCallbackURL: "/auth/sign-in?error=link_expired", fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      const error = (result as { error?: { code?: string; message?: string; status?: number } } | undefined)?.error;
+      if (error) {
+        toast.error(failMessage(error, t("auth.mail.failed")));
+        return;
+      }
+      setMailCode("");
+      setStep("link-sent");
+    } catch (err) {
+      toast.error(errorMessage(err, t("auth.mail.failed")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const redeemMailCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await authClient.twoFactor.verifyTotp({ code: totp, trustDevice: true });
-      if (res.error) {
-        toast.error(res.error.message || t("auth.ui.code.invalid"));
+      const res = await redeemLoginCodeFn({ data: { email: email.trim().toLowerCase(), code: mailCode } });
+      if (!res.ok) {
+        toast.error(res.reason === "rate_limited" ? t("auth.ui.code.tooMany") : t("auth.ui.code.invalid"));
         return;
       }
-      setNeedTotp(false);
+      window.location.assign(res.link);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const passwordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (unavailable) { toast.error(AUTH_UNAVAILABLE_TEXT[locale]); return; }
+    if (!emailAccepted() || !password) return;
+    setLoading(true);
+    const address = email.trim().toLowerCase();
+    try {
+      const result = await withAltcha(address, (proof) =>
+        authClient.signIn.email({ email: address, password, callbackURL: POST_AUTH_PATH, fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      const error = (result as { error?: { code?: string; message?: string; status?: number } } | undefined)?.error;
+      if (error) {
+        toast.error(failMessage(error, t("auth.ui.toast.signinFailed")));
+        return;
+      }
+      setPassword("");
+      if ((result as { data?: { twoFactorRedirect?: boolean } }).data?.twoFactorRedirect) {
+        setStep("second");
+        return;
+      }
       toast.success(t("auth.ui.toast.welcome"));
       await refresh();
+    } catch (err) {
+      toast.error(errorMessage(err, t("auth.ui.toast.signinFailed")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Mails a link to set a first password or replace a forgotten one. */
+  const requestReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (unavailable) { toast.error(AUTH_UNAVAILABLE_TEXT[locale]); return; }
+    if (!emailAccepted()) return;
+    setLoading(true);
+    const address = email.trim().toLowerCase();
+    try {
+      const result = await withAltcha(address, (proof) =>
+        authClient.requestPasswordReset({ email: address, redirectTo: "/auth/reset-password", fetchOptions: { headers: { "x-altcha": proof } } }),
+      );
+      const error = (result as { error?: { code?: string; message?: string; status?: number } } | undefined)?.error;
+      if (error) {
+        toast.error(failMessage(error, t("auth.ui.toast.failed")));
+        return;
+      }
+      setStep("reset-sent");
+    } catch (err) {
+      toast.error(errorMessage(err, t("auth.ui.toast.failed")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetToken) return;
+    if (password.length < MIN_PASSWORD) { toast.error(t("auth.mf.tooShort")); return; }
+    if (password !== password2) { toast.error(t("auth.mf.mismatch")); return; }
+    setLoading(true);
+    try {
+      const res = await authClient.resetPassword({ newPassword: password, token: resetToken });
+      if (res.error) {
+        toast.error(/token/i.test(res.error.message ?? "") ? t("auth.mf.resetInvalid") : res.error.message || t("auth.ui.toast.failed"));
+        return;
+      }
+      setPassword("");
+      setPassword2("");
+      setResetToken(null);
+      toast.success(t("auth.mf.resetDone"));
+      setMode("signin");
+      setStep("password");
     } finally {
       setLoading(false);
     }
@@ -269,7 +386,7 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
         value={email}
         onChange={(e) => onEmailChange(e.target.value)}
         placeholder={t("auth.email.placeholder")}
-        autoComplete="email"
+        autoComplete="username webauthn"
         aria-invalid={emailError ? true : undefined}
         aria-describedby={emailError ? "auth-email-error" : undefined}
         className={`h-10 rounded-lg ${emailError ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
@@ -283,7 +400,17 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
   const linkButton = (target: Mode, label: string, Icon: typeof KeyRound) => (
     <button
       type="button"
-      onClick={() => setMode(target)}
+      onClick={() => { setMode(target); setStep("choose"); }}
+      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
+    </button>
+  );
+
+  const linkButtonStep = (target: SignInStep, label: string, Icon: typeof KeyRound) => (
+    <button
+      type="button"
+      onClick={() => setStep(target)}
       className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
     >
       <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
@@ -304,38 +431,137 @@ export default function AuthNeon({ initialMode = "signin" }: { initialMode?: Mod
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 sm:p-7">
           <div className="mb-4">
             <h1 className="mb-1 font-display text-2xl text-foreground">
-              {adminPortal ? t("auth.admin") : mode === "signup" ? t("auth.ui.signup.cta") : mode === "recovery" ? t("auth.pk.recoveryTitle") : t("auth.ui.title")}
+              {adminPortal ? t("auth.admin") : mode === "signup" ? t("auth.ui.signup.cta") : mode === "recovery" ? t("auth.pk.recoveryTitle") : mode === "reset" ? t("auth.mf.resetTitle") : t("auth.ui.title")}
             </h1>
-            <p className="text-sm text-muted-foreground">{mode === "recovery" ? t("auth.pk.recoverySubtitle") : t("auth.pk.subtitle")}</p>
+            {mode !== "reset" && step !== "second" && (
+              <p className="text-sm text-muted-foreground">{mode === "recovery" ? t("auth.pk.recoverySubtitle") : mode === "signup" ? t("auth.pk.signupSubtitle") : t("auth.pk.subtitle")}</p>
+            )}
           </div>
 
           {unavailable && <Alert variant="destructive" className="mb-4"><AlertDescription>{AUTH_UNAVAILABLE_TEXT[locale]}</AlertDescription></Alert>}
 
-          {mode === "signin" && (
+          {mode === "signin" && step === "second" && (
+            <SecondFactorStep
+              allowTrust={!adminPortal}
+              onDone={refresh}
+              onRestart={() => setStep("choose")}
+            />
+          )}
+
+          {mode === "signin" && step !== "second" && (
             <div className="space-y-3">
-              <Button type="button" onClick={() => void passkeyLogin()} disabled={loading || unavailable} className="cta-glow h-auto min-h-12 w-full gap-2 whitespace-normal px-4 py-3 text-center text-sm leading-tight sm:text-base">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4 shrink-0" />} <span className="min-w-0">{t("auth.passkey")}</span>
-              </Button>
-              <p className="text-center text-[11px] text-muted-foreground">{t("auth.passkey.hint")}</p>
-              {needTotp && (
-                <form onSubmit={verifyTotp} className="space-y-2 rounded-xl border border-border p-3">
-                  <p className="text-sm">{t("auth.totp")}</p>
-                  <input
-                    value={totp}
-                    onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    aria-label={t("auth.ui.code.label")}
-                    className="h-11 w-full rounded-xl border border-input bg-background text-center font-mono tracking-[0.4em]"
-                  />
-                  <Button type="submit" disabled={loading || totp.length !== 6} className="h-11 w-full rounded-xl">{t("auth.confirm")}</Button>
+              {(step === "choose" || step === "password") && (
+                <>
+                  <Button type="button" onClick={() => void passkeyLogin()} disabled={loading || unavailable} className="cta-glow h-auto min-h-12 w-full gap-2 whitespace-normal px-4 py-3 text-center text-sm leading-tight sm:text-base">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4 shrink-0" />} <span className="min-w-0">{t("auth.passkey")}</span>
+                  </Button>
+                  <p className="text-center text-[11px] text-muted-foreground">{t("auth.passkey.hint")}</p>
+                  <div className="flex items-center gap-3 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <span className="h-px flex-1 bg-border" aria-hidden /> {t("auth.mf.orEmail")} <span className="h-px flex-1 bg-border" aria-hidden />
+                  </div>
+                  <form onSubmit={step === "password" ? passwordLogin : (e) => { e.preventDefault(); void sendLink(); }} className="space-y-3">
+                    {emailField}
+                    {step === "password" && (
+                      <div className="space-y-1">
+                        <Label htmlFor="auth-password" className="text-sm">{t("auth.mf.password")}</Label>
+                        <Input id="auth-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" maxLength={128} required className="h-10 rounded-lg" />
+                      </div>
+                    )}
+                    {step === "password" ? (
+                      <Button type="submit" disabled={loading || unavailable || !password} className="h-11 w-full gap-2 rounded-lg">
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />} {t("auth.ui.password.signin")}
+                      </Button>
+                    ) : (
+                      <Button type="submit" variant="outline" disabled={loading || unavailable || !!emailError} className="h-11 w-full gap-2 rounded-lg">
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} {t("auth.mf.sendLink")}
+                      </Button>
+                    )}
+                  </form>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {step === "password"
+                      ? linkButtonStep("choose", t("auth.mf.useLink"), Mail)
+                      : linkButtonStep("password", t("auth.mf.usePassword"), Lock)}
+                    {linkButtonStep("reset-request", t("auth.mf.forgot"), KeyRound)}
+                  </div>
+                  {adminPortal && <p className="text-[11px] text-muted-foreground">{t("auth.mf.adminNote")}</p>}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                    {!adminPortal && linkButton("signup", t("auth.ui.signup.cta"), KeyRound)}
+                    {linkButton("recovery", t("auth.mf.recoveryLink"), LifeBuoy)}
+                  </div>
+                </>
+              )}
+
+              {step === "link-sent" && (
+                <div className="space-y-3" data-testid="auth-link-sent">
+                  <div className="space-y-2 rounded-2xl border border-border bg-card/60 p-4 text-center">
+                    <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/60"><MailCheck className="h-5 w-5" aria-hidden /></span>
+                    <p className="font-medium text-foreground">{t("auth.mf.linkSentTitle")}</p>
+                    <p className="text-sm text-muted-foreground">{t("auth.mf.linkSentBody", { email: email.trim().toLowerCase() })}</p>
+                  </div>
+                  <form onSubmit={redeemMailCode} className="space-y-2">
+                    <Label htmlFor="auth-mail-code" className="text-sm">{t("auth.mf.codeFromMail")}</Label>
+                    <input
+                      id="auth-mail-code"
+                      value={mailCode}
+                      onChange={(e) => setMailCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      className="h-11 w-full rounded-xl border border-input bg-background text-center font-mono tracking-[0.4em] text-foreground"
+                    />
+                    <Button type="submit" disabled={loading || mailCode.length !== 6} className="h-11 w-full rounded-xl">
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t("auth.mf.useCode")}
+                    </Button>
+                  </form>
+                  {linkButtonStep("choose", t("auth.mf.otherAddress"), ArrowLeft)}
+                </div>
+              )}
+
+              {step === "reset-request" && (
+                <form onSubmit={requestReset} className="space-y-3">
+                  <div>
+                    <p className="font-medium text-foreground">{t("auth.mf.resetRequestTitle")}</p>
+                    <p className="text-sm text-muted-foreground">{t("auth.mf.resetRequestBody")}</p>
+                  </div>
+                  {emailField}
+                  <Button type="submit" disabled={loading || unavailable || !!emailError} className="h-11 w-full gap-2 rounded-lg">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} {t("auth.mf.resetSend")}
+                  </Button>
+                  {linkButtonStep("choose", t("auth.mf.backToSignIn"), ArrowLeft)}
                 </form>
               )}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                {!adminPortal && linkButton("signup", t("auth.ui.signup.cta"), KeyRound)}
-                {linkButton("recovery", t("auth.pk.noPasskey"), LifeBuoy)}
-              </div>
+
+              {step === "reset-sent" && (
+                <div className="space-y-3 rounded-2xl border border-border bg-card/60 p-4 text-center">
+                  <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/60"><MailCheck className="h-5 w-5" aria-hidden /></span>
+                  <p className="text-sm text-muted-foreground">{t("auth.mf.resetSent", { email: email.trim().toLowerCase() })}</p>
+                  {linkButtonStep("choose", t("auth.mf.backToSignIn"), ArrowLeft)}
+                </div>
+              )}
             </div>
+          )}
+
+          {mode === "reset" && (
+            resetToken ? (
+              <form onSubmit={saveNewPassword} className="space-y-3">
+                <p className="text-sm text-muted-foreground">{t("auth.mf.resetBody")}</p>
+                <div className="space-y-1">
+                  <Label htmlFor="auth-new-password" className="text-sm">{t("auth.mf.newPassword")}</Label>
+                  <Input id="auth-new-password" type="password" value={password} minLength={MIN_PASSWORD} maxLength={128} autoComplete="new-password" required onChange={(e) => setPassword(e.target.value)} className="h-10 rounded-lg" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="auth-new-password-2" className="text-sm">{t("auth.mf.repeatPassword")}</Label>
+                  <Input id="auth-new-password-2" type="password" value={password2} minLength={MIN_PASSWORD} maxLength={128} autoComplete="new-password" required onChange={(e) => setPassword2(e.target.value)} className="h-10 rounded-lg" />
+                </div>
+                <Button type="submit" disabled={loading || password.length < MIN_PASSWORD || password !== password2} className="h-11 w-full rounded-lg">
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t("auth.mf.resetSave")}
+                </Button>
+              </form>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">{t("auth.mf.resetInvalid")}</p>
+                <Button type="button" variant="outline" className="h-11 w-full" onClick={() => { setMode("signin"); setStep("reset-request"); }}>{t("auth.mf.resetSend")}</Button>
+              </div>
+            )
           )}
 
           {mode === "signup" && !adminPortal && (

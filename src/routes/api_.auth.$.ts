@@ -5,12 +5,11 @@ import { authConfigurationReadiness, AUTH_UNAVAILABLE_TEXT } from "@/lib/auth-re
 import { logServerError } from "@/lib/security/safe-errors";
 
 /**
- * ROUT's own auth endpoint (self-hosted Better Auth), PASSKEY-ONLY.
- * Sessions come only from WebAuthn: passkey assertion, or first-passkey
- * registration with a signed sign-up ticket / admin-approved recovery token.
- * Passwords, magic links and social sign-in are refused (`passkey-only.ts`);
- * social providers can only be linked to a signed-in member. A member
- * without a passkey is quarantined: their session is never honoured.
+ * ROUT's own auth endpoint (self-hosted Better Auth).
+ * First factor: passkey, one-time e-mail link or e-mail + password
+ * (`sign-in-policy.ts`); with 2FA on, password and e-mail-link sign-ins need a
+ * second step. Social providers can only be linked to a signed-in member.
+ * Admins can never switch 2FA off.
  */
 
 /** POST endpoints where the provider id travels in the JSON body. */
@@ -20,8 +19,6 @@ const STALE_CALLBACK_ERRORS = new Set(["state_mismatch", "please_restart_the_pro
 
 /** Registration endpoints for the first passkey (`context` = sign-up ticket or recovery token). */
 const REGISTER_PATHS = new Set(["/passkey/generate-register-options", "/passkey/verify-registration"]);
-/** What a quarantined (passkey-less) session may still do. */
-const QUARANTINE_OPEN = new Set(["/sign-out", "/passkey/generate-authenticate-options", "/passkey/verify-authentication"]);
 
 function json(body: unknown, status: number) {
   return Response.json(body, { status, headers: { "cache-control": "no-store" } });
@@ -93,9 +90,19 @@ export async function handleAuthRequest({ request }: { request: Request }) {
       { code: "passkey_email_change_required", message: "Wijzig je primaire e-mailadres via de beveiligde ROUT-accountpagina." },
       { status: 403, headers: { "cache-control": "no-store" } },
     );
-    const { passkeyOnlyDecision, METHOD_DISABLED_MESSAGE } = await import("@/lib/auth/passkey-only");
-    if (!passkeyOnlyDecision(relativePath).allow) {
+    const { signInPathDecision, METHOD_DISABLED_MESSAGE, FIRST_FACTOR_PATHS } = await import("@/lib/auth/sign-in-policy");
+    if (!signInPathDecision(relativePath).allow) {
       return json({ code: "method_disabled", message: METHOD_DISABLED_MESSAGE }, 410);
+    }
+    // Password, e-mail link and reset requests: fail-closed rate limit + bot check first.
+    if (request.method === "POST" && FIRST_FACTOR_PATHS.has(relativePath)) {
+      const { hitRateLimit, clientIp } = await import("@/lib/rate-limit-db.server");
+      const { RATE_RULES, tooManyRequests } = await import("@/lib/rate-limit-rules");
+      const limit = await hitRateLimit("auth", `${clientIp(request)}:${relativePath}`, RATE_RULES.authAttempt, { failClosed: true });
+      if (!limit.ok) return tooManyRequests(limit.retryAfter);
+      const { verifyAltcha } = await import("@/lib/altcha.server");
+      const altcha = await verifyAltcha(request.headers.get("x-altcha"));
+      if (!altcha.ok) return json({ code: "altcha_invalid", message: "Botcontrole mislukt. Probeer het opnieuw." }, 400);
     }
     const provider = (await providerFromBody(request, relativePath)) ?? providerFromPath(relativePath);
     // Zero-trust admin portal: social/OAuth sign-in is refused server-side.
@@ -124,17 +131,18 @@ export async function handleAuthRequest({ request }: { request: Request }) {
       console.info(`[auth] gitlab redirect_uri=${gitlabRedirectUri()}`);
     }
 
-    // Quarantine: a session whose member owns no passkey is never honoured.
     const auth = createRoutAuth(request);
     const hasCookie = /better-auth|session/i.test(request.headers.get("cookie") ?? "");
-    const live = hasCookie ? await auth.api.getSession({ headers: request.headers }).catch(() => null) : null;
+    const needsSession = REGISTER_PATHS.has(relativePath) || relativePath === "/two-factor/disable";
+    const live = hasCookie && needsSession ? await auth.api.getSession({ headers: request.headers }).catch(() => null) : null;
     const liveUser = (live as { user?: { id?: unknown } } | null)?.user;
     const sessionUserId = typeof liveUser?.id === "string" ? liveUser.id : null;
-    if (sessionUserId && !QUARANTINE_OPEN.has(relativePath)) {
-      const { authUserHasPasskey } = await import("@/lib/auth/quarantine.server");
-      if (!(await authUserHasPasskey(sessionUserId))) {
-        if (relativePath === "/get-session") return json(null, 200);
-        return json({ code: "passkey_required", message: "Dit account heeft nog geen passkey en staat in quarantaine. Meld je af en vraag herstel aan via /auth/recovery." }, 403);
+    // 2FA is mandatory for admins: they can switch it off only after losing the role.
+    if (relativePath === "/two-factor/disable" && sessionUserId) {
+      const { authUserIsAdmin } = await import("@/lib/auth/second-factor.server");
+      if (await authUserIsAdmin(sessionUserId)) {
+        const { ADMIN_TWO_FACTOR_REQUIRED } = await import("@/lib/auth/sign-in-policy");
+        return json({ code: ADMIN_TWO_FACTOR_REQUIRED, message: "Voor beheerders is tweestapsverificatie verplicht en kan ze niet uit." }, 403);
       }
     }
     // First-passkey enrollment must run signed out, so the ticket/token decides the account.
@@ -159,10 +167,6 @@ export async function handleAuthRequest({ request }: { request: Request }) {
     }
 
     const res = await auth.handler(request);
-    if (relativePath === "/passkey/verify-registration" && res.ok) {
-      const { forgetPasskeyCache } = await import("@/lib/auth/quarantine.server");
-      if (sessionUserId) forgetPasskeyCache(sessionUserId);
-    }
     if (relativePath === "/passkey/generate-authenticate-options" && res.ok) {
       // Ensure the browser requests biometric/PIN verification; the verified hook also checks UV.
       const options = await res.json() as Record<string, unknown>;
