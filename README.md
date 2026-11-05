@@ -204,7 +204,7 @@ All of this runs on European infrastructure (Neon Postgres in `eu-central-1`, Sc
  │                          │      │  *.server.ts             server-only logic│
  │ Crypto enclave worker    │      │                                           │
  │  (keys, E2EE, ledger)    │      │  request-context.ts ─► cookies/headers    │
- │ ALTCHA worker (PoW)      │      │  auth/  passkey-only Better Auth          │
+ │ ALTCHA worker (PoW)      │      │  auth/  Better Auth + 2FA policy          │
  └──────────────────────────┘      │  db/    guarded query gateway ─► neon.ts  │
                                    └──────────────┬──────────────┬─────────────┘
                                                   │              │
@@ -230,7 +230,7 @@ All of this runs on European infrastructure (Neon Postgres in `eu-central-1`, Sc
 1. **Routing.** TanStack Router file routes in `src/routes` render pages via SSR. `__root.tsx` holds the shared shell. Protected areas live under the `_authenticated` layout.
 2. **Server boundary.** App-internal calls use `createServerFn` (`*.functions.ts`). External callers (webhooks, OAuth, cron, wallets, agents) use server routes (`src/routes/api_.*`, `src/routes/api_.public.*`). Each public handler checks its own caller with signatures, tokens or PoW.
 3. **Request context.** Any module reachable from a server route reads cookies, headers and the request through `src/lib/request-context.ts` (`createServerOnlyFn` wrappers). It never imports framework server internals directly, which keeps server code out of the browser bundle.
-4. **Auth.** `src/lib/auth/middleware.ts` resolves the Better Auth session. Members without a passkey are **quarantined** (`quarantine.server.ts`, `bridge.server.ts`). Sensitive actions require **step-up** re-authentication (`step-up*.ts`).
+4. **Auth.** `src/lib/auth/middleware.ts` resolves the Better Auth session. Members sign in with a passkey, e-mail link or password; a second step follows when 2FA is on (mandatory for admins). Sensitive actions require **step-up** re-authentication (`step-up*.ts`).
 5. **Database.** Handlers run inside `withDbContext(...)` (`src/lib/neon.ts`). Every query batch switches to the `rout_app` role and sets `rout.current_user_id` / `rout.workspace_id` with `set_config(..., true)` (transaction-local). It also asserts that the role is not an owner, a superuser or RLS-bypassing. Postgres **row-level security** decides what is visible.
 6. **Browser data client.** `src/lib/db/client.ts` gives the UI a familiar query-builder API. Each descriptor is sent to a guarded server function (`gateway.functions.ts`), checked against a policy (`policy.server.ts`, `query-schema.ts`), and compiled to parameterised SQL (`execute.server.ts`). Identifiers are allow-listed and values are always bind parameters.
 
@@ -261,7 +261,7 @@ Both transports run the **same guarded, atomic batches**: there are no interacti
 │   │   └── [.]well-known.*     # OIDC discovery, JWKS, OpenAPI, atproto-did, agent manifest
 │   ├── lib/                    # domain + server logic (~1,070 files)
 │   │   ├── agent/              # agent sandboxes, AI manifest
-│   │   ├── auth/               # passkey-only policy, step-up, quarantine, sessions
+│   │   ├── auth/               # sign-in + 2FA policy, step-up, recovery, sessions
 │   │   ├── booking-engine/     # availability, event types, tokens
 │   │   ├── crypto/ crypto-enclave/ e2ee/   # key handling, enclave worker, E2EE
 │   │   ├── db/                 # browser query builder, policy, SQL compiler
@@ -311,11 +311,14 @@ Both transports run the **same guarded, atomic batches**: there are no interacti
 
 ROUT treats security as architecture, not as a feature. These guarantees are enforced in code and tests:
 
-### Authentication: passkeys only
-- `src/lib/auth/passkey-only.ts` allow-lists the Better Auth endpoints. **There is no password, magic-link or social fallback.**
-- A first passkey requires a **signed sign-up ticket** (`signup-ticket.ts`) or an **admin-approved recovery token** (`passkey-enrollment.server.ts`, `db/0207_auth_quarantine.sql`).
+### Authentication: passkey, e-mail link or password, plus a real second step
+- `src/lib/auth/sign-in-policy.ts` allow-lists the Better Auth endpoints. First factors: a **passkey** (WebAuthn, user verification required), a **one-time e-mail link** (15 minutes, with a 6-digit code for another device) or **e-mail + password** (min. 12 characters, set or reset through an e-mailed link that signs out other devices).
+- With 2FA on, password and e-mail-link sign-ins stop at a **second step**: authenticator app (TOTP), **SMS** to a verified number, a one-time recovery code or a passkey. E-mail is never a second factor. `src/lib/auth/magic-link-two-factor.ts` extends the second step to e-mail links and exposes `GET /api/auth/two-factor/options`.
+- **2FA is optional for members and mandatory for admins**: every admin server call refuses until it is on, the admin portal shows the setup screen first, and the gateway refuses `/two-factor/disable` for admins.
+- Password, e-mail-link and reset requests pass a fail-closed rate limit and the ALTCHA bot check first. On the admin portal, sign-in mails only go to admin addresses.
+- New accounts are created only with a passkey and a **signed sign-up ticket** (`signup-ticket.ts`); the out-of-band **recovery token** flow (`passkey-enrollment.server.ts`, `db/0207_auth_quarantine.sql`) remains for members who lost their e-mail.
 - Social providers (Google, Apple, GitHub, GitLab, Infomaniak, Proton, generic OIDC, Bluesky, Mastodon) only **link** identities. They can never sign you in by themselves.
-- Members without a passkey are quarantined. Sensitive operations demand **step-up** re-authentication (`step-up-guard.server.ts`, `db/0141_step_up_binding.sql`).
+- Sensitive operations demand **step-up** re-authentication (`step-up-guard.server.ts`, `db/0141_step_up_binding.sql`).
 
 ### Database: deny by default
 - The runtime role `rout_app` is `NOBYPASSRLS`. Every table has **row-level security** (`db/0120`, `db/0126`, `db/0149_strict_rls_enforcement.sql`).
@@ -595,7 +598,7 @@ bun run lint
 - **~370 test files** cover pure rules (`*-rules.test.ts`), server modules, React components and routing.
 - **Postgres-backed tests** (`*-postgres.test.ts`) run real SQL, including RLS and atomic merges, against **PGlite**, an in-process Postgres. No external database is needed.
 - The browser test environment uses jsdom and `fake-indexeddb`, set up in `src/test/setup.ts`.
-- `enclave.test.ts` guarantees that the enclave worker zeroes its secrets. The `passkey-only`, `step-up`, `token-policy`, `redirect-match` and `scope-rules` suites guard the security core.
+- `enclave.test.ts` guarantees that the enclave worker zeroes its secrets. The `sign-in-policy`, `magic-link-two-factor`, `admin-two-factor`, `step-up`, `token-policy`, `redirect-match` and `scope-rules` suites guard the security core.
 
 ---
 
@@ -649,7 +652,7 @@ These items are referenced in the code or docs but not yet present in the reposi
 1. **Read the design notes first:** root `AGENTS.md` plus the `AGENTS.md` in the folder you touch. They record each decision and why it was made.
 2. Keep business rules **pure** in `*-rules.ts` and cover each rule with a focused test.
 3. Server-only code goes in `*.server.ts`. Never import it from UI modules. Use `request-context.ts` for cookies and headers.
-4. Never weaken RLS, the passkey-only policy, the enclave boundary or the PoW gate without a written design note.
+4. Never weaken RLS, the sign-in and 2FA policy, the enclave boundary or the PoW gate without a written design note.
 5. Database changes are **new** migration files only, followed by an updated snapshot.
 6. Add translations for all four languages, and run `bun scripts/i18n-audit.ts`.
 7. Run `bun run lint`, `bunx tsgo --noEmit` and `bun run test` before opening a pull request.
