@@ -8,6 +8,8 @@
  */
 import type { SealedBlob } from "@/lib/e2ee/crypto";
 import type { PrivateEnvelope } from "@/lib/ledger/crypto";
+import type { Capability, CapabilityGrant } from "@/lib/protocol/capabilities";
+import type { EventDraft, SignedEvent } from "@/lib/protocol/events";
 
 /** Public metadata of a decrypted handoff; the full config stays inside the worker. */
 export type VaultSummary = { name: string; slug?: string; description?: string };
@@ -43,6 +45,19 @@ export interface EnclaveOps {
   "ledger.lock": { req: { keyId?: string }; res: null };
 
   "hash.sha256Hex": { req: { text: string }; res: string };
+
+  /** Protocol identity (did:key, Ed25519). Created on first use, stored sealed under the device key. */
+  "protocol.identity": { req: { userId: string }; res: { did: string } };
+  /** Seal `plaintext` (transferred) for the stream, then hash-chain and sign the event. */
+  "protocol.sealEvent": {
+    req: { userId: string; stream: string; seq: number; prev: string | null; kind: string; plaintext: Uint8Array; capId?: string };
+    res: SignedEvent;
+  };
+  /** Sign a control event (`stream.genesis`, `cap.revoke`, `pub.*`) whose body is public by design. */
+  "protocol.signEvent": { req: { userId: string; draft: EventDraft }; res: SignedEvent };
+  "protocol.openEvent": { req: { userId: string; event: SignedEvent }; res: { plaintext: Uint8Array } };
+  "protocol.dpop": { req: { userId: string; method: string; url: string }; res: { proof: string } };
+  "protocol.delegate": { req: { userId: string; grant: CapabilityGrant; parent?: Capability | null }; res: Capability };
 }
 
 export type EnclaveOp = keyof EnclaveOps;
