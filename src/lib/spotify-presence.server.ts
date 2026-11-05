@@ -183,7 +183,9 @@ export async function cachedNowPlaying(userId: string): Promise<NowPlaying> {
       syncedAt: syncedMs,
     };
   }
-  const live = await nowPlaying(userId);
+  const raw = await nowPlaying(userId);
+  // Visitors never see a paused track: only a playing one is cached or returned.
+  const live: NowPlaying = raw.playing ? raw : { playing: false, reason: raw.reason };
   const syncedAt = Date.now();
   await sql`insert into public.user_music_status
       (user_id, is_playing, track_name, artist_name, album_art_url, external_url, progress_ms, duration_ms, sync_timestamp, updated_at)
