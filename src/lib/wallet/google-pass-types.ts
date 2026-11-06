@@ -7,7 +7,7 @@ export type GoogleGenericObject = {
   cardTitle: LocalizedString; header: LocalizedString; subheader: LocalizedString;
   textModulesData: GoogleTextModule[];
   barcode: { type: "QR_CODE"; value: string; alternateText: string };
-  imageModulesData: { id: string; mainImage: GoogleImage }[];
+  imageModulesData?: { id: string; mainImage: GoogleImage }[];
   linksModuleData: { uris: { uri: string; localizedDescription: LocalizedString; id: string }[] };
 };
 export type GoogleCardRow = { oneItem: { item: { firstValue: { fields: { fieldPath: string }[] } } } };

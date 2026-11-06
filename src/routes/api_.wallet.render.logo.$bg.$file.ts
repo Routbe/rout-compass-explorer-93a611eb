@@ -1,12 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-/** GET /api/wallet/render/logo/<bg hex>/<light|dark>.png — 660² crest, 17.5% safe padding. Immutable per URL. */
+/**
+ * GET /api/wallet/render/logo/<bg hex>/<rout|light|dark>.png — 660² official ROUT
+ * badge (bunny in purple + mint rings) inside Google's circular safe area.
+ * `rout.png` picks the bunny tone by contrast. Immutable per URL.
+ */
 export const Route = createFileRoute("/api_/wallet/render/logo/$bg/$file")({
   server: { handlers: { GET: async ({ params }) => {
     const bg = String(params.bg ?? "").toLowerCase();
-    const tone = ({ "light.png": "light", "dark.png": "dark" } as const)[String(params.file) as "light.png" | "dark.png"];
-    if (!/^[0-9a-f]{6}$/.test(bg) || !tone) return new Response("Not found", { status: 404 });
+    const file = String(params.file);
+    if (!/^[0-9a-f]{6}$/.test(bg) || !["rout.png", "light.png", "dark.png"].includes(file)) return new Response("Not found", { status: 404 });
     const { googlePremiumLogoSvg, GOOGLE_PASS_DESIGN } = await import("@/lib/wallet/google-premium-art");
+    const { pickLogoTone } = await import("@/lib/wallet/wallet-color");
+    const tone = file === "light.png" ? "light" : file === "dark.png" ? "dark" : pickLogoTone(`#${bg}`);
     const { svgToPng } = await import("@/lib/og-render.server");
     const { walletOrigin } = await import("@/lib/wallet/wallet-payload.server");
     const png = await svgToPng(googlePremiumLogoSvg(`#${bg}`, tone), walletOrigin(), `#${bg}`, GOOGLE_PASS_DESIGN.logoSize);

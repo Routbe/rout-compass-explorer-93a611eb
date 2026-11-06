@@ -1,8 +1,7 @@
 import { saturation, walletCardColor } from "./wallet-art";
 import { cardNumberFromDigest } from "./card-number";
 import { createLocalizedString, walletText } from "./wallet-i18n";
-import { googleArtworkVersion, googlePassBackground } from "./google-premium-art";
-import { pickLogoTone } from "./wallet-color";
+import { GOOGLE_PASS_DESIGN, googleArtworkVersion, googlePassBackground } from "./google-premium-art";
 import type { GoogleCardClaims, GoogleGenericObject } from "./google-pass-types";
 /**
  * Wallet pass content for profiles and events (pure, browser-safe).
@@ -254,8 +253,9 @@ export function googleCardObject(card: WalletCardPayload, issuerId: string, clas
     hexBackgroundColor: googlePassBackground(card),
     logo: { sourceUri: { uri: googleLogoUrl(card) }, contentDescription: i18n("ROUT") },
     cardTitle: i18n("ROUT"),
-    header: i18n(`@${card.handle}`),
-    subheader: i18n(WALLET_DEFAULT_SUBHEADER),
+    // Big line = the member's name; the small line above it = their public address.
+    header: i18n(card.displayName),
+    subheader: i18n(`${card.space === "alias" ? "@u/" : "@"}${card.handle}`),
     textModulesData: [
       { id: "name", localizedHeader: walletText("name"), body: card.displayName },
       { id: "card", localizedHeader: walletText("cardNumber"), body: card.sovereignId },
@@ -267,14 +267,11 @@ export function googleCardObject(card: WalletCardPayload, issuerId: string, clas
     ],
     barcode: { type: "QR_CODE", value: card.qrValue, alternateText: clip(card.url.replace(/^https?:\/\//, ""), 60) },
     heroImage: { sourceUri: { uri: googleCardArtworkUrl(card, "hero") }, contentDescription: i18n(`ROUT Card · ${card.displayName}`) },
-    imageModulesData: [
-      { id: "strip", mainImage: { sourceUri: { uri: googleCardArtworkUrl(card, "strip") }, contentDescription: i18n("ROUT Sovereign Card") } },
-    ],
     linksModuleData: { uris: [{ uri: card.url, localizedDescription: walletText("audit"), id: "open" }] },
   };
 }
 
-export function googleCardArtworkUrl(card: WalletCardPayload, kind: "hero" | "strip"): string {
+export function googleCardArtworkUrl(card: WalletCardPayload, kind: "hero" = "hero"): string {
   return new URL(`/api/wallet/render/${encodeURIComponent(walletCardId(card))}/${googleArtworkVersion(card)}/${kind}.png`, card.url).href;
 }
 
@@ -320,8 +317,7 @@ export function appleCardPassJson(card: WalletCardPayload, cfg: { passTypeId: st
   };
 }
 
-/** Clean static logo URL: harmonised background + contrast-picked crest tone. */
-export function googleLogoUrl(card: WalletCardPayload): string {
-  const bg = googlePassBackground(card);
-  return new URL(`/api/wallet/render/logo/${bg.slice(1)}/${pickLogoTone(bg)}.png`, card.url).href;
+/** Official ROUT badge (bunny in purple + mint rings) on brand ink; identical for every member. */
+export function googleLogoUrl(card: Pick<WalletCardPayload, "url">): string {
+  return new URL(`/api/wallet/render/logo/${GOOGLE_PASS_DESIGN.background.slice(1).toLowerCase()}/rout.png`, card.url).href;
 }

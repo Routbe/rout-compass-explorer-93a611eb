@@ -10,17 +10,23 @@ export type OkLab = { L: number; a: number; b: number };
 export type OkLch = { L: number; C: number; h: number }; // h in radians
 
 export const HARMONY = {
-  /** Luxury dark matte lightness band (OKLab L, 0..1). */
-  minL: 0.15,
-  maxL: 0.2,
-  /** Chroma cap keeps the tone deeply desaturated. */
-  maxC: 0.035,
+  /** Jewel-tone lightness band (OKLab L): rich colour, still dark enough for Wallet's white text. */
+  minL: 0.3,
+  maxL: 0.44,
+  /** Chroma window: never grey for a coloured profile, never neon (Google's "vibrant zone"). */
+  minC: 0.05,
+  maxC: 0.14,
   /** Below this chroma a colour is treated as neutral (hue is noise). */
   neutralC: 0.012,
+  /** A canvas needs at least this chroma to lead the tile hue; otherwise the accent leads. */
+  leadC: 0.04,
+  /** White pass text must keep WCAG AA contrast on the tile. */
+  minWhiteContrast: 4.5,
   /** Ambient glow behind the crest: brighter, still restrained. */
-  glowL: 0.62,
-  glowC: 0.11,
-  fallback: "#111318" as Hex6,
+  glowL: 0.74,
+  glowC: 0.12,
+  graphite: { L: 0.255, C: 0.008, h: 4.4 },
+  fallback: "#1f2128" as Hex6,
 } as const;
 
 const HEX = /^#?([0-9a-f]{6})$/i;
@@ -87,33 +93,40 @@ export const hexToOklch = (hex: string): OkLch | null => {
   return rgb ? oklabToLch(rgbToOklab(rgb)) : null;
 };
 
-/** Definitive Google Wallet hexBackgroundColor for a member colour. */
+/** Definitive Google Wallet tile colour (hexBackgroundColor) for one member colour. */
 export function harmonizeBackground(hex: string | null | undefined): Hex6 {
   const lch = hexToOklch(hex ?? "");
   if (!lch) return HARMONY.fallback;
-  const neutral = lch.C < HARMONY.neutralC;
+  if (lch.C < HARMONY.neutralC) return oklchToHex(HARMONY.graphite);
   // Map the source lightness into the band instead of flattening, so tones keep a hint of their weight.
-  const L = HARMONY.minL + clamp(lch.L, 0, 1) * (HARMONY.maxL - HARMONY.minL);
-  const C = neutral ? 0.006 : Math.min(lch.C, HARMONY.maxC);
-  return oklchToHex({ L, C, h: neutral ? 4.4 /* faint cool blue-grey */ : lch.h });
+  let L = HARMONY.minL + clamp(lch.L, 0, 1) * (HARMONY.maxL - HARMONY.minL);
+  const C = clamp(lch.C, HARMONY.minC, HARMONY.maxC);
+  let out = oklchToHex({ L, C, h: lch.h });
+  for (let i = 0; i < 20 && contrastRatio("#ffffff", out) < HARMONY.minWhiteContrast; i++) {
+    L -= 0.01;
+    out = oklchToHex({ L, C, h: lch.h });
+  }
+  return out;
 }
 
 /**
- * Pass background from the whole profile palette: the profile canvas and accent are
- * mixed in OKLab (perceptually even, 65 % canvas / 35 % accent) and the mix is then
- * pulled into the matte band. A neutral canvas therefore picks up a hint of the accent,
- * a coloured canvas keeps its own hue.
+ * Tile colour from the whole profile palette: a clearly coloured canvas leads the
+ * hue (so two members with the same accent still get different tiles); a neutral,
+ * pale or black canvas hands the lead to the accent so the tile is never grey.
  */
 export function harmonizeProfileBackground(profileBg: string | null | undefined, accent: string | null | undefined): Hex6 {
-  const p = parseHex(profileBg ?? "");
-  const a = parseHex(accent ?? "");
+  const p = hexToOklch(profileBg ?? "");
+  const a = hexToOklch(accent ?? "");
   if (!p) return harmonizeBackground(accent);
-  if (!a) return harmonizeBackground(profileBg);
-  const lp = rgbToOklab(p);
-  const la = rgbToOklab(a);
-  const w = 0.65;
-  const mix = { L: lp.L * w + la.L * (1 - w), a: lp.a * w + la.a * (1 - w), b: lp.b * w + la.b * (1 - w) };
-  return harmonizeBackground(oklchToHex(oklabToLch(mix)));
+  if (!a || p.C >= HARMONY.leadC) return harmonizeBackground(profileBg);
+  return harmonizeBackground(accent);
+}
+
+/** Lighter / darker sibling of a tile colour (same hue), for depth in the artwork. */
+export function shadeTile(hex: string, dL: number, cScale = 1): Hex6 {
+  const lch = hexToOklch(hex);
+  if (!lch) return HARMONY.fallback;
+  return oklchToHex({ L: clamp(lch.L + dL, 0, 1), C: Math.min(0.3, lch.C * cScale), h: lch.h });
 }
 
 /** Ambient glow tone behind the crest, same hue family as the background. */
