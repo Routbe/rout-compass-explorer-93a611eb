@@ -1,4 +1,4 @@
-import { BRAND, bunny, bunnyWithRings, LOGO_VIEWBOX } from "@/lib/brand/logo";
+import { BRAND, bunny, LOGO_VIEWBOX } from "@/lib/brand/logo";
 import { harmonizeGlow, harmonizeProfileBackground, hexToOklch, LOGO_TONES, oklchToHex, pickLogoTone, shadeTile, type LogoTone } from "./wallet-color";
 
 /**
@@ -62,9 +62,16 @@ export const googlePassBackground = (card: Pick<GoogleArtworkCard, "accentHex" |
  */
 export function googlePremiumLogoSvg(bg: string = GOOGLE_PASS_DESIGN.background, tone: LogoTone = pickLogoTone(bg)): string {
   const d = GOOGLE_PASS_DESIGN;
-  const r = d.logoSize / 2;
+  const c = d.logoSize / 2;
+  const safe = c * (1 - 2 * d.logoPadding) + 16; // ring sits on the edge of the 15 % safe circle
+  const sw = safe * 0.05;
   const ink = tone === "light" ? BRAND.paper : LOGO_TONES.dark;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${d.logoSize}" height="${d.logoSize}" viewBox="0 0 ${d.logoSize} ${d.logoSize}"><rect width="${d.logoSize}" height="${d.logoSize}" fill="${bg}"/>${bunnyWithRings(r, r, r * (1 - 2 * d.logoPadding), ink)}</svg>`;
+  const bw = safe * 1.42;
+  const bh = (bw * LOGO_VIEWBOX.height) / LOGO_VIEWBOX.width;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${d.logoSize}" height="${d.logoSize}" viewBox="0 0 ${d.logoSize} ${d.logoSize}"><rect width="${d.logoSize}" height="${d.logoSize}" fill="${bg}"/>`
+    + `<circle cx="${c}" cy="${c}" r="${safe - sw / 2}" fill="none" stroke="${BRAND.purple}" stroke-width="${sw}"/>`
+    + `<circle cx="${c}" cy="${c}" r="${safe * 0.86}" fill="none" stroke="${BRAND.mint}" stroke-width="${sw}"/>`
+    + `${bunny(c - bw / 2, c - bh / 2 - safe * 0.02, bw, ink)}</svg>`;
 }
 
 /* ------------------------------------------------------------ hero artwork */
@@ -86,7 +93,7 @@ function guillocheBand(cx: number, cy: number, o: { R: number; a: number; b: num
   const steps = o.steps ?? 480;
   let d = "";
   for (let i = 0; i < o.lines; i++) {
-    const phi = (i / o.lines) * (2 * Math.PI) / o.n;
+    const phi = (i / o.lines) * 2 * Math.PI;
     for (let s = 0; s <= steps; s++) {
       const t = (s / steps) * 2 * Math.PI;
       const r = o.R + o.a * Math.sin(o.n * t + phi) + o.b * Math.sin(o.m * t - 2 * phi);
@@ -100,14 +107,13 @@ function guillocheBand(cx: number, cy: number, o: { R: number; a: number; b: num
 /** Horizontal security ribbon behind the medallion, so the art spans the full pass width. */
 function ribbon(w: number, cy: number, lines: number, amp: number, waves: number, seed: number): string {
   let d = "";
-  const steps = 160;
+  const steps = 200;
   for (let i = 0; i < lines; i++) {
-    const off = (i - (lines - 1) / 2) * 7;
     const ph = (i / lines) * Math.PI * 2 + (seed % 97) / 15;
     for (let s = 0; s <= steps; s++) {
       const x = (s / steps) * w;
       const t = (s / steps) * Math.PI * 2 * waves;
-      const y = cy + off + amp * Math.sin(t + ph) * (0.55 + 0.45 * Math.cos(t / waves * 0.5));
+      const y = cy + amp * Math.sin(t + ph) + amp * 0.35 * Math.sin(2.5 * t - ph);
       d += `${s ? "L" : "M"}${f1(x)} ${f1(y)}`;
     }
   }
@@ -140,8 +146,8 @@ export function googlePremiumArtworkSvg(card: GoogleArtworkCard, _kind: GoogleAr
   const n2 = 6 + ((seed >>> 3) % 5);
   const m = 2 * n + 1 + ((seed >>> 7) % 3);
 
-  const outerBand = guillocheBand(cx, cy, { R: outer - 56, a: 26, b: 9, n, m, lines: 26 });
-  const innerBand = guillocheBand(cx, cy, { R: outer - 140, a: 14, b: 6, n: n2 * 2, m: n2 * 3 + 1, lines: 18 });
+  const outerBand = guillocheBand(cx, cy, { R: outer - 58, a: 20, b: 7, n, m, lines: 16 });
+  const innerBand = guillocheBand(cx, cy, { R: outer - 132, a: 12, b: 4, n: n2 * 2, m: n2 * 3 + 1, lines: 12 });
   const ticks = Array.from({ length: 144 }, (_, i) => {
     const a = (i / 144) * Math.PI * 2;
     const r1 = outer - 8;
@@ -182,10 +188,10 @@ export function googlePremiumArtworkSvg(card: GoogleArtworkCard, _kind: GoogleAr
     + `</defs>`
     // ambient glow + full-width ribbon
     + `<ellipse cx="${cx}" cy="${cy}" rx="${w * 0.62}" ry="${outer * 1.15}" fill="url(#ambient)"/>`
-    + `<g mask="url(#edge)" fill="none" stroke="url(#foil2)" stroke-width="1" stroke-opacity=".32"><path d="${ribbon(w, cy, 12, 26, 3, seed)}"/></g>`
+    + `<g mask="url(#edge)" fill="none" stroke="url(#foil2)" stroke-width=".9" stroke-opacity=".4"><path d="${ribbon(w, cy, 22, 34, 4, seed)}"/></g>`
     // medallion body
     + `<circle cx="${cx}" cy="${cy}" r="${outer}" fill="${deep}" fill-opacity=".55"/>`
-    + `<g clip-path="url(#medal)"><path d="${outerBand}" fill="none" stroke="url(#foil)" stroke-width="1.1" stroke-opacity=".78"/></g>`
+    + `<g clip-path="url(#medal)"><path d="${outerBand}" fill="none" stroke="url(#foil)" stroke-width=".9" stroke-opacity=".8"/></g>`
     + `<circle cx="${cx}" cy="${cy}" r="${outer}" fill="none" stroke="url(#foil)" stroke-width="2.4"/>`
     + `<path d="${ticks}" stroke="url(#foil)" stroke-width="1.6"/>`
     + `<circle cx="${cx}" cy="${cy}" r="${outer - 30}" fill="none" stroke="url(#foil)" stroke-width=".9" stroke-opacity=".7"/>`
