@@ -66,7 +66,7 @@ export function googlePremiumLogoSvg(bg: string = GOOGLE_PASS_DESIGN.background,
   const safe = c * (1 - 2 * d.logoPadding) + 16; // ring sits on the edge of the 15 % safe circle
   const sw = safe * 0.05;
   const ink = tone === "light" ? BRAND.paper : LOGO_TONES.dark;
-  const bw = safe * 1.42;
+  const bw = safe * 1.2;
   const bh = (bw * LOGO_VIEWBOX.height) / LOGO_VIEWBOX.width;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${d.logoSize}" height="${d.logoSize}" viewBox="0 0 ${d.logoSize} ${d.logoSize}"><rect width="${d.logoSize}" height="${d.logoSize}" fill="${bg}"/>`
     + `<circle cx="${c}" cy="${c}" r="${safe - sw / 2}" fill="none" stroke="${BRAND.purple}" stroke-width="${sw}"/>`
@@ -161,7 +161,7 @@ export function googlePremiumArtworkSvg(card: GoogleArtworkCard, _kind: GoogleAr
   }).join("");
 
   const disc = outer - 176;
-  const bw = disc * 1.18;
+  const bw = disc * 1.3;
   const bh = (bw * LOGO_VIEWBOX.height) / LOGO_VIEWBOX.width;
 
   let seal = "";
