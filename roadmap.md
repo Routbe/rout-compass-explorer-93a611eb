@@ -23,6 +23,10 @@
    - [x] Pass colours harmonised with profile colours (OKLab)
    - [x] High-res logo, monogram, badge on the pass
    - [ ] Live test with service account keys (blocked: keys not configured in this project)
+   - [x] New "Sovereign Foil" design: ROUT bunny logo, profile tile colour, no photo
+   - [ ] Fix card tests for the new design
+   - [ ] New design must reach passes already saved in the owner's Google Wallet (owner deploys via Vercel with own Wallet keys)
+   - [ ] "Write to NFC tag" in the share menu (Web NFC)
 5. Agent zero-knowledge handoff
    - [x] Unclaimed agent designs encrypted at rest with the rsk_ key
    - [x] Claim-flow tests (signed-in and anonymous)
