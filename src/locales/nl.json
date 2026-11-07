@@ -1838,5 +1838,10 @@
   "profile.vw.eventToday": "Vandaag!",
   "profile.vw.eventPast": "Voorbij",
   "profile.vw.days_one": "dag",
-  "profile.vw.days_other": "dagen"
+  "profile.vw.days_other": "dagen",
+  "profile.nfcTagDenied": "NFC-toegang geweigerd. Zet NFC aan en sta het toe in Chrome.",
+  "profile.nfcTagFailed": "Schrijven mislukt. Probeer opnieuw of gebruik een andere sticker.",
+  "profile.nfcTagHold": "Houd een NFC-sticker tegen de achterkant van je telefoon…",
+  "profile.nfcTagWritten": "Klaar: wie de sticker aantikt, opent je profiel.",
+  "profile.writeNfcTag": "Op NFC-sticker zetten"
 }

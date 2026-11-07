@@ -47,8 +47,11 @@ export const Route = createFileRoute("/api_/wallet/google")({
             );
           }
           const { googleCardSave } = await import("@/lib/wallet/google-wallet.server");
+          // Owner-verified above: refresh an already-saved pass, since Google ignores the JWT object then.
+          const { syncGoogleCardQuietly } = await import("@/lib/wallet/google-wallet-sync.server");
+          const sync = await syncGoogleCardQuietly(card, walletOrigin(), cfg);
           const { jwt, saveUrl } = await googleCardSave(card, walletOrigin(), cfg);
-          return Response.json({ jwt, saveUrl }, { headers });
+          return Response.json({ jwt, saveUrl, updatedExisting: sync.object === "updated" }, { headers });
         } catch (e) {
           console.error("[wallet] google card failed", (e as Error)?.message);
           return Response.json({ error: "wallet_issue_failed" }, { status: 500, headers });

@@ -1838,5 +1838,10 @@
   "profile.vw.eventToday": "Heute!",
   "profile.vw.eventPast": "Vorbei",
   "profile.vw.days_one": "Tag",
-  "profile.vw.days_other": "Tage"
+  "profile.vw.days_other": "Tage",
+  "profile.nfcTagDenied": "NFC-Zugriff verweigert. Schalte NFC ein und erlaube es in Chrome.",
+  "profile.nfcTagFailed": "Schreiben fehlgeschlagen. Versuche es erneut oder nimm einen anderen Sticker.",
+  "profile.nfcTagHold": "Halte einen NFC-Sticker an die Rückseite deines Telefons…",
+  "profile.nfcTagWritten": "Fertig: Wer den Sticker antippt, öffnet dein Profil.",
+  "profile.writeNfcTag": "Auf NFC-Sticker schreiben"
 }

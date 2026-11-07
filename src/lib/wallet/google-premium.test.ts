@@ -5,12 +5,15 @@ import { googleCardObject, googleCardSaveClaims, walletCardPayload } from "./wal
 
 const card = walletCardPayload({ handle: "maker", space: "root", displayName: "Maker", tagline: "My work", themeBg: "#ff00ff", accent: "#ff0000", avatarSrc: null }, "https://rout.be", "RT-235Q-ABCD-X");
 describe("premium Google pass rules", () => {
-  it("harmonises saturated profile colours into a dark matte background", () => {
+  it("harmonises saturated profile colours into a rich jewel-tone tile with readable white text", async () => {
+    const { contrastRatio } = await import("./wallet-color");
     const bg = googleCardObject(card, "3388").hexBackgroundColor;
     const lch = hexToOklch(bg)!;
-    expect(lch.L).toBeGreaterThanOrEqual(0.149);
-    expect(lch.L).toBeLessThanOrEqual(0.201);
-    expect(lch.C).toBeLessThanOrEqual(0.036);
+    expect(lch.L).toBeGreaterThanOrEqual(0.25);
+    expect(lch.L).toBeLessThanOrEqual(0.445);
+    expect(lch.C).toBeGreaterThanOrEqual(0.045);
+    expect(lch.C).toBeLessThanOrEqual(0.145);
+    expect(contrastRatio("#ffffff", bg)).toBeGreaterThanOrEqual(4.5);
     expect(card.hexBackgroundColor).toBe("#ff00ff");
   });
   it("reserves exactly two front rows for card number and the profile hub", () => {
@@ -22,9 +25,17 @@ describe("premium Google pass rules", () => {
     expect(GOOGLE_PASS_DESIGN.logoSize).toBe(660);
     expect(GOOGLE_PASS_DESIGN.logoPadding).toBe(0.175);
   });
-  it("uses 1032x812 hero and 1200x375 strip dimensions", () => {
+  it("uses a 1032x812 hero and no strip image or profile photo", () => {
     expect([GOOGLE_PASS_DESIGN.heroWidth, GOOGLE_PASS_DESIGN.heroHeight]).toEqual([1032, 812]);
-    expect([GOOGLE_PASS_DESIGN.stripWidth, GOOGLE_PASS_DESIGN.stripHeight]).toEqual([1200, 375]);
+    const object = googleCardObject({ ...card, heroImageUrl: "https://rout.be/api/public/avatar?path=a/b.webp" }, "3388");
+    expect(object.imageModulesData ?? []).toEqual([]);
+    expect(object.heroImage.sourceUri.uri).not.toContain("avatar");
+  });
+  it("shows the official ROUT badge as logo, identical for every member", () => {
+    const a = googleCardObject(card, "3388").logo.sourceUri.uri;
+    const b = googleCardObject({ ...card, handle: "other", hexBackgroundColor: "#123456" }, "3388").logo.sourceUri.uri;
+    expect(a).toBe("https://rout.be/api/wallet/render/logo/131211/rout.png");
+    expect(b).toBe(a);
   });
   it("versions clean public PNG URLs when card data changes", () => {
     const object = googleCardObject(card, "3388");
@@ -42,29 +53,28 @@ describe("Google pass follows the whole profile palette", () => {
     expect(blue).not.toBe(red);
     for (const hex of [blue, red]) {
       const lch = hexToOklch(hex)!;
-      expect(lch.L).toBeGreaterThanOrEqual(0.149);
-      expect(lch.L).toBeLessThanOrEqual(0.201);
-      expect(lch.C).toBeLessThanOrEqual(0.036);
+      expect(lch.L).toBeLessThanOrEqual(0.445);
+      expect(lch.C).toBeGreaterThanOrEqual(0.045);
     }
   });
   it("a neutral canvas picks up the accent hue instead of staying grey", async () => {
     const { harmonizeProfileBackground, hexToOklch } = await import("./wallet-color");
     const lch = hexToOklch(harmonizeProfileBackground("#0b0b0b", "#e11d48"))!;
-    expect(lch.C).toBeGreaterThan(0.012);
+    expect(lch.C).toBeGreaterThanOrEqual(0.045);
   });
   it("logo tone keeps readable contrast on the harmonised background", async () => {
     const { contrastRatio, LOGO_TONES, pickLogoTone } = await import("./wallet-color");
     const bg = googleCardObject(card, "3388").hexBackgroundColor;
     expect(contrastRatio(LOGO_TONES[pickLogoTone(bg)], bg)).toBeGreaterThanOrEqual(4.5);
   });
-  it("member seal shows initials and, for verified members only, the check", async () => {
+  it("hero carries no text; only verified members get the check seal", async () => {
     const { googlePremiumArtworkSvg, walletMonogram } = await import("./google-premium-art");
     expect(walletMonogram("Daniel Delacroix", "dd")).toBe("DD");
     expect(walletMonogram("élodie", "x")).toBe("É");
     expect(walletMonogram("@", "maker")).toBe("M");
     const plain = googlePremiumArtworkSvg({ ...card, displayName: "Ada Lovelace" }, "hero");
     const verified = googlePremiumArtworkSvg({ ...card, displayName: "Ada Lovelace", verified: true }, "hero");
-    expect(plain).toContain(">AL</text>");
+    expect(plain).not.toContain("<text");
     expect(verified.length).toBeGreaterThan(plain.length);
     expect(verified).toContain('stroke-linecap="round"');
     expect(plain).not.toContain('stroke-linecap="round"');

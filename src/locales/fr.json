@@ -1838,5 +1838,10 @@
   "profile.vw.eventToday": "Aujourd'hui !",
   "profile.vw.eventPast": "Passé",
   "profile.vw.days_one": "jour",
-  "profile.vw.days_other": "jours"
+  "profile.vw.days_other": "jours",
+  "profile.nfcTagDenied": "Accès NFC refusé. Activez le NFC et autorisez-le dans Chrome.",
+  "profile.nfcTagFailed": "Échec de l'écriture. Réessayez ou utilisez un autre autocollant.",
+  "profile.nfcTagHold": "Tenez un autocollant NFC contre le dos de votre téléphone…",
+  "profile.nfcTagWritten": "C'est fait : un simple contact avec l'autocollant ouvre votre profil.",
+  "profile.writeNfcTag": "Écrire sur un autocollant NFC"
 }

@@ -1838,5 +1838,10 @@
   "profile.vw.eventToday": "Today!",
   "profile.vw.eventPast": "Passed",
   "profile.vw.days_one": "day",
-  "profile.vw.days_other": "days"
+  "profile.vw.days_other": "days",
+  "profile.nfcTagDenied": "NFC access denied. Turn on NFC and allow it in Chrome.",
+  "profile.nfcTagFailed": "Writing failed. Try again or use another sticker.",
+  "profile.nfcTagHold": "Hold an NFC sticker against the back of your phone…",
+  "profile.nfcTagWritten": "Done: anyone who taps the sticker opens your profile.",
+  "profile.writeNfcTag": "Write to NFC sticker"
 }

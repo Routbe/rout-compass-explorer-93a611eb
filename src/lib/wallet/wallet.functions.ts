@@ -18,7 +18,10 @@ export const createWalletPass = createServerFn({ method: "POST" })
     if (!cfg) return { ok: false as const, error: "wallet_not_configured" };
     try {
       const { googleCardSave } = await import("./google-wallet.server");
-      return { ok: true as const, ...(await googleCardSave(own, walletOrigin(), cfg)) };
+      // Google ignores the JWT object when the pass is already saved: push the current design first.
+      const { syncGoogleCardQuietly } = await import("./google-wallet-sync.server");
+      const sync = await syncGoogleCardQuietly(own, walletOrigin(), cfg);
+      return { ok: true as const, ...(await googleCardSave(own, walletOrigin(), cfg)), updatedExisting: sync.object === "updated" };
     } catch {
       console.error("[wallet] owner claim signing failed");
       return { ok: false as const, error: "wallet_issue_failed" };
