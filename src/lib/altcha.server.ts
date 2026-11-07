@@ -33,12 +33,21 @@ export type AltchaResult = { ok: true } | { ok: false; reason: string };
 
 let warnedDerived = false;
 
-/** ALTCHA_HMAC_KEY, or a key derived from the auth secret so a missing variable never blocks sign-in. */
-async function hmacKey(): Promise<string> {
+/**
+ * ALTCHA_HMAC_KEY, or a key derived from another server-only secret (auth secret, then the
+ * database URL). Never a value from the source tree: with no secret at all the bot check is
+ * not configured and fails closed, because a public constant would let anyone forge proofs.
+ */
+async function hmacKey(): Promise<string | null> {
   const direct = process.env["ALTCHA_HMAC_KEY"];
   if (direct && direct.length >= 16) return direct;
   const { resolveAuthSecret } = await import("@/lib/better-auth.server");
-  const seed = resolveAuthSecret()?.secret ?? process.env["DATABASE_URL"] ?? "rout-altcha-unconfigured";
+  const dbUrl = process.env["DATABASE_URL"];
+  const seed = resolveAuthSecret()?.secret ?? (dbUrl && dbUrl.length >= 16 ? dbUrl : null);
+  if (!seed) {
+    console.error("[altcha] No ALTCHA_HMAC_KEY, BETTER_AUTH_SECRET or DATABASE_URL set: bot check refuses all proofs.");
+    return null;
+  }
   if (!warnedDerived) {
     warnedDerived = true;
     console.warn("[altcha] ALTCHA_HMAC_KEY not set — using a key derived from the auth secret.");
@@ -55,7 +64,9 @@ export async function createAltchaChallenge(opts: { hard?: boolean } = {}): Prom
   const expires = Math.floor(Date.now() / 1000) + TTL_SECONDS;
   const salt = `${randomBytes(12).toString("hex")}?expires=${expires}&d=${opts.hard ? "h" : "n"}`;
   const challenge = sha256(salt + randomInt(0, maxnumber + 1));
-  const signature = createHmac("sha256", await hmacKey()).update(challenge).digest("hex");
+  const key = await hmacKey();
+  if (!key) throw new Error("altcha_not_configured");
+  const signature = createHmac("sha256", key).update(challenge).digest("hex");
   return { algorithm: "SHA-256", challenge, salt, signature, maxnumber };
 }
 
@@ -96,7 +107,9 @@ export async function verifyAltcha(
   if (!expires || expires * 1000 < Date.now()) return { ok: false, reason: "expired" };
   if (opts.requireHard && params.get("d") !== "h") return { ok: false, reason: "too_easy" };
 
-  const expected = createHmac("sha256", await hmacKey()).update(challenge).digest("hex");
+  const key = await hmacKey();
+  if (!key) return { ok: false, reason: "not_configured" };
+  const expected = createHmac("sha256", key).update(challenge).digest("hex");
   if (!safeEqualHex(expected, signature)) return { ok: false, reason: "bad_signature" };
   if (!safeEqualHex(sha256(salt + number), challenge)) return { ok: false, reason: "bad_solution" };
 
