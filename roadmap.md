@@ -24,9 +24,11 @@
    - [x] High-res logo, monogram, badge on the pass
    - [ ] Live test with service account keys (blocked: keys not configured in this project)
    - [x] New "Sovereign Foil" design: ROUT bunny logo, profile tile colour, no photo
-   - [ ] Fix card tests for the new design
-   - [ ] New design must reach passes already saved in the owner's Google Wallet (owner deploys via Vercel with own Wallet keys)
-   - [ ] "Write to NFC tag" in the share menu (Web NFC)
+   - [x] Fix card tests for the new design
+   - [x] Already-saved Google passes get the new design (REST update before the save link)
+   - [ ] Owner's Vercel site shows the new work (blocked: GitHub repo Routbe/rout-compass-explorer stops at 5 Nov 10:44; this project is not linked to it, the owner must connect GitHub and point Vercel at it)
+   - [x] "Write to NFC sticker" in the share menu (Web NFC, Chrome on Android)
+   - [ ] NFC inside the Google Wallet pass (blocked: Smart Tap needs Google approval and certified readers)
 5. Agent zero-knowledge handoff
    - [x] Unclaimed agent designs encrypted at rest with the rsk_ key
    - [x] Claim-flow tests (signed-in and anonymous)
