@@ -32,15 +32,14 @@ describe("ROUT Card wallet payload", () => {
   it("Google object carries handle, theme colour and a QR_CODE barcode", () => {
     const o = googleCardObject(root, "3388000000000000000");
     expect(o.classId).toBe("3388000000000000000.rout_card");
-    expect(o.header.defaultValue.value).toBe("@jona");
+    expect(o.header.defaultValue.value).toBe("Jona Zeno");
+    expect(o.subheader?.defaultValue.value).toBe("@jona");
     // Neutral canvas is tinted with the accent: the closed pass is never flat grey.
     expect(o.hexBackgroundColor).toBe(harmonizeProfileBackground(root.hexBackgroundColor, root.accentHex));
     expect(o.barcode).toMatchObject({ type: "QR_CODE", value: "https://rout.be/@jona" });
     expect(o.heroImage.sourceUri.uri).toMatch(/^https:\/\/rout\.be\/api\/wallet\/render\/jona\/[a-z0-9]+\/hero\.png$/);
-    expect(o.logo.sourceUri.uri).toBe(`https://rout.be/api/wallet/render/logo/${o.hexBackgroundColor.slice(1)}/light.png`);
-    expect(o.imageModulesData.map((m) => m.mainImage.sourceUri.uri)).toEqual([
-      o.heroImage.sourceUri.uri.replace("hero.png", "strip.png"),
-    ]);
+    expect(o.logo.sourceUri.uri).toBe("https://rout.be/api/wallet/render/logo/131211/rout.png");
+    expect(o.imageModulesData).toBeUndefined();
   });
 
   it("Apple pass shows the same QR and colours as Google", () => {
