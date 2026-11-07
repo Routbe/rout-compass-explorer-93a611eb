@@ -92,6 +92,25 @@ export function ShareMenu({ url, handle, name, bio, avatarUrl, showNfc, qrStyle,
     a.download = `${handle || "rout"}-qr.png`;
     a.click();
   };
+  // Web NFC (Chrome on Android): write the public profile link onto a blank NFC sticker.
+  const [canWriteNfc, setCanWriteNfc] = useState(false);
+  useEffect(() => setCanWriteNfc(typeof window !== "undefined" && "NDEFReader" in window), []);
+  const writeNfcTag = async () => {
+    type Ndef = { write: (msg: { records: { recordType: string; data: string }[] }, opts?: { signal?: AbortSignal }) => Promise<void> };
+    const Reader = (window as unknown as { NDEFReader?: new () => Ndef }).NDEFReader;
+    if (!Reader) return;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30_000);
+    const id = toast.loading(t("profile.nfcTagHold"));
+    try {
+      await new Reader().write({ records: [{ recordType: "url", data: url }] }, { signal: ctrl.signal });
+      toast.success(t("profile.nfcTagWritten"), { id });
+    } catch (e) {
+      toast.error(t((e as Error)?.name === "NotAllowedError" ? "profile.nfcTagDenied" : "profile.nfcTagFailed"), { id });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const run = (fn: () => Promise<void>) => () =>
     void fn().catch(() => toast.error(t("profile.generationFailed")));
 
@@ -124,6 +143,11 @@ export function ShareMenu({ url, handle, name, bio, avatarUrl, showNfc, qrStyle,
           {handle && (
             <DropdownMenuItem onSelect={() => setWalletOpen(true)}>
               <Wallet className="mr-2 h-4 w-4" aria-hidden /> {t("wallet.add")}
+            </DropdownMenuItem>
+          )}
+          {canWriteNfc && (
+            <DropdownMenuItem onSelect={() => void writeNfcTag()}>
+              <Nfc className="mr-2 h-4 w-4" aria-hidden /> {t("profile.writeNfcTag")}
             </DropdownMenuItem>
           )}
           {showNfc && (
